@@ -17,21 +17,26 @@ module Actor =
         member _.Error msg = Akkling.Logging.logError ctx msg
         member _.Errorf = Akkling.Logging.logErrorf ctx
 
+    type private ActionInfo<'Args, 'Result, 'Cont> = {
+        args: 'Args
+        next: 'Result -> 'Cont
+    }
+
     type private Action<'cont> =
-        | Stop of (unit -> 'cont)
-        | GetActor of (Akka.Actor.IActorRef -> 'cont)
-        | UnsafeGetActorCtx of (Akkling.Actors.Actor<obj> -> 'cont)
-        | GetLogger of (Logger -> 'cont)
-        | GetMsg of (obj -> 'cont)
-        | GetSender of (Akka.Actor.IActorRef -> 'cont)
-        | CreateChildActor of (Akka.Actor.IActorRefFactory -> Akka.Actor.IActorRef) * (Akka.Actor.IActorRef -> 'cont)
-        | Stash of (unit -> 'cont)
-        | UnstashOne of (unit -> 'cont)
-        | UnstashAll of (unit -> 'cont)
-        | Watch of Akka.Actor.IActorRef * (unit -> 'cont)
-        | Unwatch of Akka.Actor.IActorRef * (unit -> 'cont)
-        | Schedule of (Akkling.Actors.Actor<obj> -> Akka.Actor.ICancelable) * (Akka.Actor.ICancelable -> 'cont)
-        | Select of string * (Akka.Actor.ActorSelection -> 'cont)
+        | Stop of ActionInfo<unit, unit, 'cont>
+        | GetActor of ActionInfo<unit, Akka.Actor.IActorRef, 'cont>
+        | UnsafeGetActorCtx of ActionInfo<unit, Akkling.Actors.Actor<obj>, 'cont>
+        | GetLogger of ActionInfo<unit, Logger, 'cont>
+        | GetMsg of ActionInfo<unit, obj, 'cont>
+        | GetSender of ActionInfo<unit, Akka.Actor.IActorRef, 'cont>
+        | CreateChildActor of ActionInfo<Akka.Actor.IActorRefFactory -> Akka.Actor.IActorRef, Akka.Actor.IActorRef, 'cont>
+        | Stash of ActionInfo<unit, unit, 'cont>
+        | UnstashOne of ActionInfo<unit, unit, 'cont>
+        | UnstashAll of ActionInfo<unit, unit, 'cont>
+        | Watch of ActionInfo<Akka.Actor.IActorRef, unit, 'cont>
+        | Unwatch of ActionInfo<Akka.Actor.IActorRef, unit, 'cont>
+        | Schedule of ActionInfo<Akkling.Actors.Actor<obj> -> Akka.Actor.ICancelable, Akka.Actor.ICancelable, 'cont>
+        | Select of ActionInfo<string, Akka.Actor.ActorSelection, 'cont>
 //        | SetCrashHandler
 //        | ClearCrashHandler
 
@@ -41,22 +46,27 @@ module Actor =
         | Done of 'Result
         | More of Action<Program<'Result>>
 
+    let private updateAction case payload f = case {
+        args = payload.args
+        next = payload.next >> f
+    }
+
     let private mapA f a =
         match a with
-        | Stop next -> Stop (next >> f)
-        | GetActor next -> GetActor (next >> f)
-        | UnsafeGetActorCtx next -> UnsafeGetActorCtx (next >> f)
-        | GetLogger next -> GetLogger (next >> f)
-        | GetMsg next -> GetMsg (next >> f)
-        | GetSender next -> GetSender (next >> f)
-        | CreateChildActor (make, next) -> CreateChildActor (make, next >> f)
-        | Stash next -> Stash (next >> f)
-        | UnstashOne next -> UnstashOne (next >> f)
-        | UnstashAll next -> UnstashAll (next >> f)
-        | Watch (act, next) -> Watch (act, next >> f)
-        | Unwatch (act, next) -> Unwatch (act, next >> f)
-        | Schedule (act, next) -> Schedule (act, next >> f)
-        | Select (act, next) -> Select (act, next >> f)
+        | Stop info -> updateAction Stop info f
+        | GetActor info -> updateAction GetActor info f
+        | UnsafeGetActorCtx info -> updateAction UnsafeGetActorCtx info f
+        | GetLogger info -> updateAction GetLogger info f
+        | GetMsg info -> updateAction GetMsg info f
+        | GetSender info -> updateAction GetSender info f
+        | CreateChildActor info -> updateAction CreateChildActor info f
+        | Stash info -> updateAction Stash info f
+        | UnstashOne info -> updateAction UnstashOne info f
+        | UnstashAll info -> updateAction UnstashAll info f
+        | Watch info -> updateAction Watch info f
+        | Unwatch info -> updateAction Unwatch info f
+        | Schedule info -> updateAction Schedule info f
+        | Select info -> updateAction Select info f
 
     let rec private bind f p =
         match p with
@@ -102,40 +112,40 @@ module Actor =
                     match nextAction with
                     | Stop _ ->
                         Akkling.Spawn.stop ()
-                    | GetActor next ->
-                        handleNextAction state (next (Akkling.ActorRefs.untyped ctx.Self))
-                    | UnsafeGetActorCtx next ->
-                        handleNextAction state (next ctx)
-                    | GetLogger next ->
-                        handleNextAction state (next (Logger ctx))
-                    | GetMsg next ->
-                        Akkling.Spawn.become (handleMessage state next)
-                    | GetSender next ->
-                        handleNextAction state (next (ctx.Sender () |> Akkling.ActorRefs.untyped))
-                    | CreateChildActor(make, next) ->
-                        let newAct = make ctx
-                        handleNextAction state (next newAct)
-                    | Stash next ->
+                    | GetActor info ->
+                        handleNextAction state (info.next (Akkling.ActorRefs.untyped ctx.Self))
+                    | UnsafeGetActorCtx info ->
+                        handleNextAction state (info.next ctx)
+                    | GetLogger info ->
+                        handleNextAction state (info.next (Logger ctx))
+                    | GetMsg info ->
+                        Akkling.Spawn.become (handleMessage state info.next)
+                    | GetSender info ->
+                        handleNextAction state (info.next (ctx.Sender () |> Akkling.ActorRefs.untyped))
+                    | CreateChildActor info ->
+                        let newAct = info.args ctx
+                        handleNextAction state (info.next newAct)
+                    | Stash info ->
                         ctx.Stash ()
-                        handleNextAction state (next ())
-                    | UnstashOne next ->
+                        handleNextAction state (info.next ())
+                    | UnstashOne info ->
                         ctx.Unstash ()
-                        handleNextAction state (next ())
-                    | UnstashAll next ->
+                        handleNextAction state (info.next ())
+                    | UnstashAll info ->
                         ctx.UnstashAll ()
-                        handleNextAction state (next ())
-                    | Watch (act, next) ->
-                        ctx.Watch act |> ignore
-                        handleNextAction state (next ())
-                    | Unwatch (act, next) ->
-                        ctx.Unwatch act |> ignore
-                        handleNextAction state (next ())
-                    | Schedule (sched, next) ->
-                        let cancel = sched ctx
-                        handleNextAction state (next cancel)
-                    | Select (path, next) ->
-                        let selection = ctx.ActorSelection path
-                        handleNextAction state (next selection)
+                        handleNextAction state (info.next ())
+                    | Watch info ->
+                        ctx.Watch info.args |> ignore
+                        handleNextAction state (info.next ())
+                    | Unwatch info ->
+                        ctx.Unwatch info.args |> ignore
+                        handleNextAction state (info.next ())
+                    | Schedule info ->
+                        let cancel = info.args ctx
+                        handleNextAction state (info.next cancel)
+                    | Select info ->
+                        let selection = ctx.ActorSelection info.args
+                        handleNextAction state (info.next selection)
 
             and handleMessage state next msg =
                 //TODO: handle system messages
@@ -158,33 +168,35 @@ module Actor =
     let spawnAnonymous parent props =
         doSpawn (Akkling.Spawn.spawnAnonymous parent) props
 
-    let getActor () = More (GetActor Done)
-    let unsafeGetActorCtx () = More (UnsafeGetActorCtx Done)
-    let getLogger () = More (GetLogger Done)
-    let stop () = More (Stop Done)
-    let receive () = More (GetMsg Done)
+    let private noArg = {args = (); next = Done}
+    let private withArg args = {args = args; next = Done}
+    let getActor () = More (GetActor noArg)
+    let unsafeGetActorCtx () = More (UnsafeGetActorCtx noArg)
+    let getLogger () = More (GetLogger noArg)
+    let stop () = More (Stop noArg)
+    let receive () = More (GetMsg noArg)
     let rec receiveOnly<'Msg> () = actor {
         match! receive () with
         | :? 'Msg as m -> return m
         | _ -> return! receiveOnly<'Msg> ()
     }
-    let getSender () = More (GetSender Done)
+    let getSender () = More (GetSender noArg)
     let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
-        let create () = More (CreateChildActor (make >> Akkling.ActorRefs.untyped, Done))
+        let create () = More (CreateChildActor (withArg (make >> Akkling.ActorRefs.untyped)))
         actor {
             let! untyped = create ()
             let typed : Akkling.ActorRefs.IActorRef<'Msg> = Akkling.ActorRefs.typed untyped
             return typed
         }
 
-    let stash () = More (Stash Done)
-    let unstashOne () = More (UnstashOne Done)
-    let unstashAll () = More (UnstashAll Done)
-    let watch act = More (Watch (Akkling.ActorRefs.untyped act, Done))
-    let unwatch act = More (Unwatch (Akkling.ActorRefs.untyped act, Done))
-    let schedule delay receiver msg = More (Schedule ((fun ctx -> ctx.Schedule delay receiver msg), Done))
+    let stash () = More (Stash noArg)
+    let unstashOne () = More (UnstashOne noArg)
+    let unstashAll () = More (UnstashAll noArg)
+    let watch act = More (Watch (withArg (Akkling.ActorRefs.untyped act)))
+    let unwatch act = More (Unwatch (withArg (Akkling.ActorRefs.untyped act)))
+    let schedule delay receiver msg = More (Schedule (withArg (fun ctx -> ctx.Schedule delay receiver msg)))
     let scheduleRepeatedly delay interval receiver msg =
-        More (Schedule ((fun ctx -> ctx.ScheduleRepeatedly delay interval receiver msg), Done))
-    let select path = More (Select (path, Done))
+        More (Schedule (withArg (fun ctx -> ctx.ScheduleRepeatedly delay interval receiver msg)))
+    let select path = More (Select (withArg path))
 
 
