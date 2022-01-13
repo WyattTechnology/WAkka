@@ -1,0 +1,22 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BetterAkkling", "BetterAkkling\BetterAkkling.fsproj", "{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BetterAkklingTests", "BetterAkklingTests\BetterAkklingTests.fsproj", "{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+EndGlobal

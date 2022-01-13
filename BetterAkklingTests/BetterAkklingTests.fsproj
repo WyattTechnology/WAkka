@@ -1,0 +1,24 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <OutputType>Exe</OutputType>
+        <TargetFramework>net6.0</TargetFramework>
+    </PropertyGroup>
+
+    <ItemGroup>
+      <PackageReference Include="Akkling.TestKit" Version="0.12.0" />
+      <PackageReference Include="FsUnit" Version="4.1.0" />
+      <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.0.0" />
+      <PackageReference Include="NUnit" Version="3.13.2" />
+      <PackageReference Update="FSharp.Core" Version="6.0.1" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <ProjectReference Include="..\BetterAkkling\BetterAkkling.fsproj" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Compile Include="SpawnTests.fs" />
+    </ItemGroup>
+
+</Project>
