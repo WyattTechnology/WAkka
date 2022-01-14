@@ -65,37 +65,52 @@ with
         supervisionStrategy = None
     }
 
-type private Start = Start
-type RestartHandlerMsg = RestartHandlerMsg
+type private Start<'ActorType, 'Result> = {
+    checkpoint: Option<obj -> Action<'ActorType, 'Result>>
+    restartHandler: Option<RestartHandler>
+}
 
-let private doSpawnSimple spawnFunc (props: Props) action =
+type private RestartHandlerMsg = RestartHandlerMsg
+
+let private doSpawnSimple spawnFunc (props: Props) (persist: bool) (action: Action<'ActorType, 'Result>) =
 
     let runActor (ctx: Actors.Actor<obj>) =
 
-        let rec handleNextAction restartHandler program =
-            match program with
+        let handleLifecycle restartHandler checkpoint evt =
+            match evt with
+            | PreRestart(exn, msg) ->
+                restartHandler |> Option.iter (fun f -> f msg exn)
+                if persist then
+                    let start : Start<'ActorType, 'Result> = {checkpoint = checkpoint; restartHandler = restartHandler}
+                    retype ctx.Self <! start
+                else
+                    let start : Start<'ActorType, 'Result> = {checkpoint = None; restartHandler = None}
+                    retype ctx.Self <! start
+            | _ ->
+                ()
+            ignored ()
+
+        let rec handleNextAction restartHandler checkpoint action =
+            match action with
             | Stop _
             | Done _ ->
                 stop ()
             | Simple next ->
-                handleNextAction restartHandler (next ctx)
+                handleNextAction restartHandler checkpoint (next ctx)
             | Msg next ->
                 become (waitForMessage restartHandler next)
             | RestartHandlerUpdate (newHandler, next) ->
                 ActorRefs.retype ctx.Self <! RestartHandlerMsg
-                become (waitForNewHandler newHandler next)
+                become (waitForNewHandler newHandler checkpoint next)
 
-        and waitForNewHandler restartHandler next (msg: obj) =
+        and waitForNewHandler restartHandler checkpoint next (msg: obj) =
             match msg with
             | :? RestartHandlerMsg ->
                 ctx.UnstashAll ()
-                handleNextAction restartHandler (next ())
+                handleNextAction restartHandler checkpoint (next ())
             | :? LifecycleEvent as evt ->
-                match evt with
-                | PreRestart(exn, msg) ->
-                    restartHandler |> Option.iter (fun f -> f msg exn)
-                | _ ->
-                    ()
+                handleLifecycle restartHandler checkpoint evt
+            | :? Start<'ActorType, 'Result> ->
                 ignored ()
             | _ ->
                 ctx.Stash ()
@@ -104,27 +119,27 @@ let private doSpawnSimple spawnFunc (props: Props) action =
         and waitForMessage restartHandler next (msg: obj) =
             match msg with
             | :? LifecycleEvent as evt ->
-                match evt with
-                | PreRestart(exn, msg) ->
-                    restartHandler |> Option.iter (fun f -> f msg exn)
-                | _ ->
-                    ()
+                handleLifecycle restartHandler (Some next) evt
+            | :? Start<'ActorType, 'Result> ->
                 ignored ()
             | _ ->
-                handleNextAction restartHandler (next msg)
+                handleNextAction restartHandler (Some next) (next msg)
 
         let waitForStart (msg: obj) =
             match msg with
             | :? LifecycleEvent as evt ->
-                match evt with
-                | PreRestart(exn, msg) ->
+                let handler = fun msg exn ->
                     Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
-                | _ ->
-                    ()
-                ignored ()
-            | :? Start ->
-                handleNextAction None action
+                handleLifecycle (Some handler) None evt
+            | :? Start<'ActorType, 'Result> as start ->
+                ctx.UnstashAll ()
+                match start.checkpoint with
+                | None ->
+                    handleNextAction None None action
+                | Some checkpoint ->
+                    become (waitForMessage start.restartHandler checkpoint)
             | _ ->
+                ctx.Stash ()
                 ignored ()
 
         become waitForStart
@@ -137,17 +152,22 @@ let private doSpawnSimple spawnFunc (props: Props) action =
             Router = props.router
             SupervisionStrategy = props.supervisionStrategy
     }
-    retype act <! Start
+    let start : Start<'ActorType, 'Result> = {checkpoint = None; restartHandler = None}
+    retype act <! start
     retype act
 
 let spawn parent props actorType =
     match props.name, actorType with
     | Some name, NotPersistent action ->
-        doSpawnSimple (spawn parent name) props action
+        doSpawnSimple (Spawn.spawn parent name) props false action
+    | Some name, InMemoryPersistent action ->
+        doSpawnSimple (Spawn.spawn parent name) props true action
     | None, NotPersistent action ->
-        doSpawnSimple (spawnAnonymous parent) props action
+        doSpawnSimple (Spawn.spawnAnonymous parent) props false action
+    | None, InMemoryPersistent action ->
+        doSpawnSimple (Spawn.spawnAnonymous parent) props true action
     | _ ->
-        failwith "Not support yet"
+        failwith "Not supported yet"
 
 let getActor () = Simple (fun ctx -> Done (ActorRefs.retype ctx.Self))
 let unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
