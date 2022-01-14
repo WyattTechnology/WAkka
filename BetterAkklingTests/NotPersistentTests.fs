@@ -18,7 +18,7 @@ let ``spawn with name`` () =
 
         let rec handle () =
             Better.actor {
-                let! msg = Better.receiveOnly<Msg> ()
+                let! msg = Actions.receiveOnly<Msg> ()
                 typed probe <! msg
                 return! handle ()
             }
@@ -42,7 +42,7 @@ let ``spawn with no name`` () =
 
         let rec handle () =
             Better.actor {
-                let! msg = Better.receiveOnly<Msg> ()
+                let! msg = Actions.receiveOnly<Msg> ()
                 typed probe <! msg
                 return! handle ()
             }
@@ -66,7 +66,7 @@ let ``get actor gives correct actor ref`` () =
 
         let rec handle () =
             Better.actor {
-                let! act = Better.getActor ()
+                let! act = Actions.getActor ()
                 typed probe <! act
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
@@ -80,7 +80,7 @@ let ``get actor context gives correct actor`` () =
 
         let rec handle () =
             Better.actor {
-                let! act = Better.unsafeGetActorCtx ()
+                let! act = Actions.unsafeGetActorCtx ()
                 typed probe <! act.Self
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
@@ -95,8 +95,8 @@ let ``stop action stops the actor`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveOnly<Msg> ()
-                do! Better.stop ()
+                let! _msg = Actions.receiveOnly<Msg> ()
+                do! Actions.stop ()
                 // The actor should stop on the previous line so this message should never be sent
                 typed probe <! "should not get this"
             }
@@ -115,8 +115,8 @@ let ``create actor can create an actor`` () =
 
         let rec handle () =
             Better.actor {
-                let! self = Better.getActor ()
-                let! newAct = Better.createChild (fun parent ->
+                let! self = Actions.getActor ()
+                let! newAct = Actions.createChild (fun parent ->
                     let ctx = parent :?> Actor<obj>
                     typed probe <! ctx.Self
                     let typed : IActorRef<Msg> = retype self
@@ -138,16 +138,16 @@ let ``unstash one only unstashes one message at a time`` () =
 
         let rec handle unstashed =
             Better.actor {
-                let! msg = Better.receiveOnly<Msg> ()
+                let! msg = Actions.receiveOnly<Msg> ()
                 if msg.value > 100 then
                     typed probe <! msg
-                    do! Better.unstashOne ()
+                    do! Actions.unstashOne ()
                     return! handle true
                 elif unstashed then
                     typed probe <! msg
                     return! handle true
                 else
-                    do! Better.stash ()
+                    do! Actions.stash ()
                     return! handle false
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle false)
@@ -179,16 +179,16 @@ let ``unstash all unstashes all the messages`` () =
 
         let rec handle unstashed =
             Better.actor {
-                let! msg = Better.receiveOnly<Msg> ()
+                let! msg = Actions.receiveOnly<Msg> ()
                 if msg.value > 100 then
                     typed probe <! msg
-                    do! Better.unstashAll ()
+                    do! Actions.unstashAll ()
                     return! handle true
                 elif unstashed then
                     typed probe <! msg
                     return! handle true
                 else
-                    do! Better.stash ()
+                    do! Actions.stash ()
                     return! handle false
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle false)
@@ -214,22 +214,22 @@ let ``watch works`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = Better.actor {
-            let! _ = Better.receiveOnly<string> ()
+            let! _ = Actions.receiveOnly<string> ()
             return ()
         }
         let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.NotPersistent <| otherActor ())
 
         let rec handle () =
             Better.actor {
-                match! Better.receiveAny () with
+                match! Actions.receiveAny () with
                 | MessagePatterns.Terminated (act, _, _) ->
                     typed probe <!  act
-                    return! Better.stop ()
+                    return! Actions.stop ()
                 | _msg ->
                     return! handle ()
             }
         let start = Better.actor {
-            do! Better.watch watched
+            do! Actions.watch watched
             typed probe <! ""
             return! handle ()
         }
@@ -245,26 +245,26 @@ let ``unwatch works`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = Better.actor {
-            let! _ = Better.receiveOnly<string> ()
+            let! _ = Actions.receiveOnly<string> ()
             return ()
         }
         let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.NotPersistent <| otherActor ())
 
         let rec handle () =
             Better.actor {
-                match! Better.receiveAny () with
+                match! Actions.receiveAny () with
                 | MessagePatterns.Terminated (act, _, _) ->
                     typed probe <!  act
-                    return! Better.stop ()
+                    return! Actions.stop ()
                 | :? string ->
-                    do! Better.unwatch watched
+                    do! Actions.unwatch watched
                     typed probe <! "unwatched"
                     return! handle ()
                 | _msg ->
                     return! handle ()
             }
         let start = Better.actor {
-            do! Better.watch watched
+            do! Actions.watch watched
             typed probe <! "watched"
             return! handle ()
         }
@@ -283,11 +283,11 @@ let ``schedule works`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveAny ()
+                let! _msg = Actions.receiveAny ()
                 return! handle ()
             }
         let start = Better.actor {
-            let! _cancel = Better.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
+            let! _cancel = Actions.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
             typed probe <! "scheduled"
             return! handle ()
         }
@@ -310,11 +310,11 @@ let ``scheduled messages can be cancelled`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveAny ()
+                let! _msg = Actions.receiveAny ()
                 return! handle ()
             }
         let start = Better.actor {
-            let! cancel = Better.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
+            let! cancel = Actions.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
             cancel.Cancel ()
             typed probe <! "scheduled"
             return! handle ()
@@ -337,11 +337,11 @@ let ``schedule repeatedly works`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveAny ()
+                let! _msg = Actions.receiveAny ()
                 return! handle ()
             }
         let start = Better.actor {
-            let! _cancel = Better.scheduleRepeatedly delay interval (typed probe) "message"
+            let! _cancel = Actions.scheduleRepeatedly delay interval (typed probe) "message"
             typed probe <! "scheduled"
             return! handle ()
         }
@@ -373,8 +373,8 @@ let ``get sender get's the correct actor`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveOnly<string> ()
-                let! sender = Better.getSender ()
+                let! _msg = Actions.receiveOnly<string> ()
+                let! sender = Actions.getSender ()
                 typed probe <! untyped sender
                 return! handle ()
             }
@@ -393,11 +393,11 @@ let ``select get's the correct selection`` () =
 
         let rec handle () =
             Better.actor {
-                let! _msg = Better.receiveOnly<string> ()
+                let! _msg = Actions.receiveOnly<string> ()
                 return! handle ()
             }
         let start = Better.actor {
-            let! selection = Better.select path
+            let! selection = Actions.select path
             typed probe <! selection
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
@@ -416,24 +416,24 @@ let ``crash handler is invoked if actor crashes`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () = Better.actor {
-            let! _  = Better.receiveAny ()
+            let! _  = Actions.receiveAny ()
             return! handle ()
         }
 
         let rec crashHandle () = Better.actor {
-            let! _  = Better.receiveOnly<string> ()
+            let! _  = Actions.receiveOnly<string> ()
             failwith "crashed"
             return! handle ()
         }
         let crashStart = Better.actor {
-            do! Better.setRestartHandler (fun msg err ->
+            do! Actions.setRestartHandler (fun msg err ->
                 typed probe <! {msg = msg; err = err}
             )
             return! crashHandle ()
         }
         let start = Better.actor {
             let! crasher =
-                Better.createChild (fun f ->
+                Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
                 )
             typed probe <! crasher
@@ -464,12 +464,12 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
                 failwith "Initial crash"
 
         let rec handle () = Better.actor {
-            let! _  = Better.receiveAny ()
+            let! _  = Actions.receiveAny ()
             return! handle ()
         }
 
         let crashStart = Better.actor {
-            do! Better.setRestartHandler (fun msg err ->
+            do! Actions.setRestartHandler (fun msg err ->
                 typed probe <! {msg = msg; err = err}
             )
             checkCrash ()
@@ -477,7 +477,7 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
         }
         let start = Better.actor {
             let! crasher =
-                Better.createChild (fun f ->
+                Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
                 )
             typed probe <! crasher
@@ -499,21 +499,21 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () = Better.actor {
-            let! _  = Better.receiveAny ()
+            let! _  = Actions.receiveAny ()
             return! handle ()
         }
 
         let crashStart = Better.actor {
-            do! Better.setRestartHandler (fun msg err ->
+            do! Actions.setRestartHandler (fun msg err ->
                 typed probe <! {msg = msg; err = err}
             )
-            do! Better.clearRestartHandler ()
+            do! Actions.clearRestartHandler ()
             return! handle()
         }
 
         let start = Better.actor {
             let! crasher =
-                Better.createChild (fun f ->
+                Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
                 )
             typed probe <! crasher

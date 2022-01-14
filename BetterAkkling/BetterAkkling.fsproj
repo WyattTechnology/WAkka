@@ -14,6 +14,10 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <Compile Include="Core.fs" />
+        <Compile Include="Props.fs" />
+        <Compile Include="Spawn.fs" />
+        <Compile Include="Actions.fs" />
         <Compile Include="better.fs" />
     </ItemGroup>
 
