@@ -161,8 +161,8 @@ let scheduleRepeatedly delay interval receiver msg =
 
 let select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
 
-let setOnRestart handler = StateUpdate ((fun state -> {state with onRestart = Some handler}), Done)
-let clearOnRestart () = StateUpdate ((fun state -> {state with onRestart = None}), Done)
+let setRestartHandler handler = StateUpdate ((fun state -> {state with onRestart = Some handler}), Done)
+let clearRestartHandler () = StateUpdate ((fun state -> {state with onRestart = None}), Done)
 
 type PersistResult<'Result> =
     | Persist of 'Result

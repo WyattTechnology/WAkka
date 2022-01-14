@@ -421,7 +421,7 @@ let ``crash handler is invoked if actor crashes`` () =
         }
 
         let crashStart = Better.actor {
-            do! Better.setOnRestart (fun msg err ->
+            do! Better.setRestartHandler (fun msg err ->
                 Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
             )
             return! handle()
@@ -458,10 +458,10 @@ let ``crash handler is not invoked if handler is cleared`` () =
         }
 
         let crashStart = Better.actor {
-            do! Better.setOnRestart (fun msg err ->
+            do! Better.setRestartHandler (fun msg err ->
                 Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
             )
-            do! Better.clearOnRestart ()
+            do! Better.clearRestartHandler ()
             return! handle()
         }
 
