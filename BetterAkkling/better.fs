@@ -1,19 +1,15 @@
 ﻿module  BetterAkkling.Better
 
-type private ActorState = {
-    onRestart: Option<obj -> exn -> unit>
-}
-with
-    static member Default = {
-        onRestart = None
-    }
+open Akkling
+
+type RestartHandler = obj -> exn -> unit
 
 type Action<'Type, 'Result> =
     private
     | Done of 'Result
-    | Simple of (Akkling.Actors.Actor<obj> -> Action<'Type, 'Result>)
+    | Simple of (Actors.Actor<obj> -> Action<'Type, 'Result>)
     | Msg of (obj -> Action<'Type, 'Result>)
-    | StateUpdate of (ActorState -> ActorState) * (unit -> Action<'Type, 'Result>)
+    | RestartHandlerUpdate of Option<RestartHandler> * (unit -> Action<'Type, 'Result>)
     | Stop of (unit -> Action<'Type, 'Result>)
 
 let rec private bind (f: 'a -> Action<'t, 'b>) (op: Action<'t, 'a>) : Action<'t, 'b> =
@@ -21,7 +17,7 @@ let rec private bind (f: 'a -> Action<'t, 'b>) (op: Action<'t, 'a>) : Action<'t,
     | Done res -> f res
     | Simple cont -> Simple (cont >> bind f)
     | Msg cont -> Msg (cont >> bind f)
-    | StateUpdate (update, cont) -> StateUpdate (update, cont >> bind f)
+    | RestartHandlerUpdate (update, cont) -> RestartHandlerUpdate (update, cont >> bind f)
     | Stop cont -> Stop (cont >> bind f)
 
 type ActorBuilder () =
@@ -69,69 +65,105 @@ with
         supervisionStrategy = None
     }
 
+type private Start = Start
+type RestartHandlerMsg = RestartHandlerMsg
+
 let private doSpawnSimple spawnFunc (props: Props) action =
 
-    let runActor (ctx: Akkling.Actors.Actor<obj>) =
+    let runActor (ctx: Actors.Actor<obj>) =
 
-        let rec handleNextAction state program =
+        let rec handleNextAction restartHandler program =
             match program with
             | Stop _
             | Done _ ->
-                Akkling.Spawn.stop ()
+                stop ()
             | Simple next ->
-                handleNextAction state (next ctx)
+                handleNextAction restartHandler (next ctx)
             | Msg next ->
-                Akkling.Spawn.become (handleMessage state next)
-            | StateUpdate (update, next) ->
-                handleNextAction (update state) (next ())
+                become (waitForMessage restartHandler next)
+            | RestartHandlerUpdate (newHandler, next) ->
+                ActorRefs.retype ctx.Self <! RestartHandlerMsg
+                become (waitForNewHandler newHandler next)
 
-        and handleMessage state next (msg: obj) =
+        and waitForNewHandler restartHandler next (msg: obj) =
             match msg with
-            | :? Akkling.Actors.LifecycleEvent as evt ->
+            | :? RestartHandlerMsg ->
+                ctx.UnstashAll ()
+                handleNextAction restartHandler (next ())
+            | :? LifecycleEvent as evt ->
                 match evt with
-                | Akkling.Actors.PreRestart(exn, msg) ->
-                    state.onRestart |> Option.iter (fun f -> f msg exn)
-                | _ -> ()
+                | PreRestart(exn, msg) ->
+                    restartHandler |> Option.iter (fun f -> f msg exn)
+                | _ ->
+                    ()
+                ignored ()
             | _ ->
-                ()
+                ctx.Stash ()
+                ignored ()
 
-            handleNextAction state (next msg)
+        and waitForMessage restartHandler next (msg: obj) =
+            match msg with
+            | :? LifecycleEvent as evt ->
+                match evt with
+                | PreRestart(exn, msg) ->
+                    restartHandler |> Option.iter (fun f -> f msg exn)
+                | _ ->
+                    ()
+                ignored ()
+            | _ ->
+                handleNextAction restartHandler (next msg)
 
-        handleNextAction ActorState.Default action
+        let waitForStart (msg: obj) =
+            match msg with
+            | :? LifecycleEvent as evt ->
+                match evt with
+                | PreRestart(exn, msg) ->
+                    Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
+                | _ ->
+                    ()
+                ignored ()
+            | :? Start ->
+                handleNextAction None action
+            | _ ->
+                ignored ()
 
-    Akkling.ActorRefs.retype <| spawnFunc {
-        Akkling.Props.props runActor with
+        become waitForStart
+
+    let act = spawnFunc {
+        Props.props runActor with
             Dispatcher = props.dispatcher
             Mailbox = props.mailbox
             Deploy = props.deploy
             Router = props.router
             SupervisionStrategy = props.supervisionStrategy
     }
+    retype act <! Start
+    retype act
 
 let spawn parent props actorType =
     match props.name, actorType with
     | Some name, NotPersistent action ->
-        doSpawnSimple (Akkling.Spawn.spawn parent name) props action
+        doSpawnSimple (spawn parent name) props action
     | None, NotPersistent action ->
-        doSpawnSimple (Akkling.Spawn.spawnAnonymous parent) props action
+        doSpawnSimple (spawnAnonymous parent) props action
     | _ ->
         failwith "Not support yet"
 
-let getActor () = Simple (fun ctx -> Done (Akkling.ActorRefs.retype ctx.Self))
+let getActor () = Simple (fun ctx -> Done (ActorRefs.retype ctx.Self))
 let unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
 
-type Logger internal (ctx:Akkling.Actors.Actor<obj>) =
-    member _.Log level msg = Akkling.Logging.log level ctx msg
-    member _.Logf level = Akkling.Logging.logf level ctx
-    member _.LogException err = Akkling.Logging.logException ctx err
-    member _.Debug msg = Akkling.Logging.logDebug ctx msg
-    member _.Debugf = Akkling.Logging.logDebugf ctx
-    member _.Info msg = Akkling.Logging.logInfo ctx msg
-    member _.Infof = Akkling.Logging.logInfof ctx
-    member _.Warning msg = Akkling.Logging.logWarning ctx msg
-    member _.Warningf = Akkling.Logging.logWarningf ctx
-    member _.Error msg = Akkling.Logging.logError ctx msg
-    member _.Errorf = Akkling.Logging.logErrorf ctx
+type Logger internal (ctx:Actors.Actor<obj>) =
+    member _.Log level msg = Logging.log level ctx msg
+    member _.Logf level = Logging.logf level ctx
+    member _.LogException err = Logging.logException ctx err
+    member _.Debug msg = Logging.logDebug ctx msg
+    member _.Debugf = Logging.logDebugf ctx
+    member _.Info msg = Logging.logInfo ctx msg
+    member _.Infof = Logging.logInfof ctx
+    member _.Warning msg = Logging.logWarning ctx msg
+    member _.Warningf = Logging.logWarningf ctx
+    member _.Error msg = Logging.logError ctx msg
+    member _.Errorf = Logging.logErrorf ctx
 
 let getLogger () = Simple (fun ctx -> Done (Logger ctx))
 
@@ -145,15 +177,15 @@ let rec receiveOnly<'Msg> () : Action<SimpleActor, 'Msg> = actor {
 }
 let getSender () = Simple (fun ctx -> Done (ctx.Sender ()))
 
-let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
+let createChild (make: Akka.Actor.IActorRefFactory -> ActorRefs.IActorRef<'Msg>) =
     Simple (fun ctx -> Done (make ctx))
 
 let stash () = Simple (fun ctx -> Done (ctx.Stash ()))
 let unstashOne () = Simple (fun ctx -> Done (ctx.Unstash ()))
 let unstashAll () = Simple (fun ctx -> Done (ctx.UnstashAll ()))
 
-let watch act = Simple (fun ctx -> Done (ctx.Watch (Akkling.ActorRefs.untyped act) |> ignore))
-let unwatch act = Simple (fun ctx -> Done (ctx.Unwatch (Akkling.ActorRefs.untyped act) |> ignore))
+let watch act = Simple (fun ctx -> Done (ctx.Watch (ActorRefs.untyped act) |> ignore))
+let unwatch act = Simple (fun ctx -> Done (ctx.Unwatch (ActorRefs.untyped act) |> ignore))
 
 let schedule delay receiver msg = Simple (fun ctx -> Done (ctx.Schedule delay receiver msg))
 let scheduleRepeatedly delay interval receiver msg =
@@ -161,8 +193,8 @@ let scheduleRepeatedly delay interval receiver msg =
 
 let select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
 
-let setRestartHandler handler = StateUpdate ((fun state -> {state with onRestart = Some handler}), Done)
-let clearRestartHandler () = StateUpdate ((fun state -> {state with onRestart = None}), Done)
+let setRestartHandler handler = RestartHandlerUpdate (Some handler, Done)
+let clearRestartHandler () = RestartHandlerUpdate (None, Done)
 
 type PersistResult<'Result> =
     | Persist of 'Result

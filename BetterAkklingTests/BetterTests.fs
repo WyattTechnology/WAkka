@@ -420,13 +420,17 @@ let ``crash handler is invoked if actor crashes`` () =
             return! handle ()
         }
 
+        let rec crashHandle () = Better.actor {
+            let! _  = Better.receiveOnly<string> ()
+            failwith "crashed"
+            return! handle ()
+        }
         let crashStart = Better.actor {
             do! Better.setRestartHandler (fun msg err ->
                 Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
             )
-            return! handle()
+            return! crashHandle ()
         }
-
         let start = Better.actor {
             let! crasher =
                 Better.createChild (fun f ->
@@ -442,10 +446,52 @@ let ``crash handler is invoked if actor crashes`` () =
         let _parent = Better.spawn tk.Sys parentProps (Better.NotPersistent start)
 
         let crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
-        Akkling.ActorRefs.retype crasher <! Akka.Actor.Kill.Instance
+        Akkling.ActorRefs.retype crasher <! "crash it"
         let res = probe.ExpectMsg<CrashMsg>()
-        res.msg :?> Akka.Actor.Kill |> ignore
-        res.err :?> Akka.Actor.ActorKilledException |> ignore
+        res.msg :?> string |> ignore
+        res.err :?> Exception |> ignore
+
+[<Test>]
+let ``crash handler is invoked if actor crashes before calling receive`` () =
+    Akkling.TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let mutable alreadyCrashed = 0
+
+        let rec checkCrash () =
+            if alreadyCrashed = 0 then
+                Threading.Interlocked.Increment(&alreadyCrashed) |> ignore
+                failwith "Initial crash"
+
+        let rec handle () = Better.actor {
+            let! _  = Better.receiveAny ()
+            return! handle ()
+        }
+
+        let crashStart = Better.actor {
+            do! Better.setRestartHandler (fun msg err ->
+                Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
+            )
+            checkCrash ()
+            return! handle()
+        }
+        let start = Better.actor {
+            let! crasher =
+                Better.createChild (fun f ->
+                    Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
+                )
+            Akkling.ActorRefs.typed probe <! crasher
+            return! handle ()
+        }
+        let parentProps = {
+            Better.Props.Named "parent" with
+                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = Better.spawn tk.Sys parentProps (Better.NotPersistent start)
+
+        let _crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
+        let _res = probe.ExpectMsg<CrashMsg>()
+        ignore _res
 
 [<Test>]
 let ``crash handler is not invoked if handler is cleared`` () =
