@@ -123,7 +123,7 @@ module Actor =
                     | GetSender info ->
                         handleNextAction state (info.next (ctx.Sender () |> Akkling.ActorRefs.untyped))
                     | CreateChildActor info ->
-                        let newAct = info.args ctx
+                        let newAct = info.args (ctx :> Akka.Actor.IActorRefFactory)
                         handleNextAction state (info.next newAct)
                     | Stash info ->
                         ctx.Stash ()
@@ -198,5 +198,4 @@ module Actor =
     let scheduleRepeatedly delay interval receiver msg =
         More (Schedule (withArg (fun ctx -> ctx.ScheduleRepeatedly delay interval receiver msg)))
     let select path = More (Select (withArg path))
-
 

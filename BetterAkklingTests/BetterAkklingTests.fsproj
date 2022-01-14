@@ -19,6 +19,7 @@
 
     <ItemGroup>
       <Compile Include="SpawnTests.fs" />
+      <Compile Include="BetterTests.fs" />
     </ItemGroup>
 
 </Project>
