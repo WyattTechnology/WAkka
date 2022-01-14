@@ -34,28 +34,42 @@ type ActorBuilder () =
 
 let actor = ActorBuilder ()
 
+type SimpleActor = class end
+type PersistentActor = class end
 
-type Props<'Type> = {
+type ActorType =
+    | NotPersistent of Action<SimpleActor, unit>
+    | InMemoryPersistent of Action<SimpleActor, unit>
+    | ProcessPersistent of Action<PersistentActor, unit>
+
+type Props = {
+    name: Option<string>
     dispatcher: Option<string>
     mailbox: Option<string>
     deploy: Option<Akka.Actor.Deploy>
     router: Option<Akka.Routing.RouterConfig>
     supervisionStrategy: Option<Akka.Actor.SupervisorStrategy>
-    program: Action<'Type, unit>
 }
+with
+    static member Anonymous = {
+        name =  None
+        dispatcher = None
+        mailbox = None
+        deploy = None
+        router = None
+        supervisionStrategy = None
+    }
 
-let props program = {
-    dispatcher = None
-    mailbox = None
-    deploy = None
-    router = None
-    supervisionStrategy = None
-    program = program
-}
+    static member Named name = {
+        name =  Some name
+        dispatcher = None
+        mailbox = None
+        deploy = None
+        router = None
+        supervisionStrategy = None
+    }
 
-type SimpleActor = class end
-
-let private doSpawnSimple spawnFunc (props: Props<SimpleActor>) =
+let private doSpawnSimple spawnFunc (props: Props) action =
 
     let runActor (ctx: Akkling.Actors.Actor<obj>) =
 
@@ -83,7 +97,7 @@ let private doSpawnSimple spawnFunc (props: Props<SimpleActor>) =
 
             handleNextAction state (next msg)
 
-        handleNextAction ActorState.Default props.program
+        handleNextAction ActorState.Default action
 
     Akkling.ActorRefs.retype <| spawnFunc {
         Akkling.Props.props runActor with
@@ -94,11 +108,14 @@ let private doSpawnSimple spawnFunc (props: Props<SimpleActor>) =
             SupervisionStrategy = props.supervisionStrategy
     }
 
-let spawn parent name props =
-    doSpawnSimple (Akkling.Spawn.spawn parent name) props
-
-let spawnAnonymous parent props =
-    doSpawnSimple (Akkling.Spawn.spawnAnonymous parent) props
+let spawn parent props actorType =
+    match props.name, actorType with
+    | Some name, NotPersistent action ->
+        doSpawnSimple (Akkling.Spawn.spawn parent name) props action
+    | None, NotPersistent action ->
+        doSpawnSimple (Akkling.Spawn.spawnAnonymous parent) props action
+    | _ ->
+        failwith "Not support yet"
 
 let getActor () = Simple (fun ctx -> Done (Akkling.ActorRefs.retype ctx.Self))
 let unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
@@ -146,3 +163,11 @@ let select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
 
 let setOnRestart handler = StateUpdate ((fun state -> {state with onRestart = Some handler}), Done)
 let clearOnRestart () = StateUpdate ((fun state -> {state with onRestart = None}), Done)
+
+type PersistResult<'Result> =
+    | Persist of 'Result
+    | NoPersist of 'Result
+
+let persist (_action: Action<SimpleActor, PersistResult<'Result>>) : Action<PersistentActor, 'Result> = actor {
+    return Unchecked.defaultof<_>
+}
