@@ -18,8 +18,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Include="SpawnTests.fs" />
-      <Compile Include="BetterTests.fs" />
+      <Compile Include="NotPersistentTests.fs" />
     </ItemGroup>
 
 </Project>

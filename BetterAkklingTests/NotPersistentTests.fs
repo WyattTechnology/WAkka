@@ -1,4 +1,4 @@
-﻿module BetterAkklingTests.BetterTests
+﻿module BetterAkklingTests.NotPersistentTests
 
 open System
 
