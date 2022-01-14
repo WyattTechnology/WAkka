@@ -19,6 +19,7 @@
 
     <ItemGroup>
       <Compile Include="NotPersistentTests.fs" />
+      <Compile Include="InMemoryPeristentTests.fs" />
     </ItemGroup>
 
 </Project>
