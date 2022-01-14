@@ -1,10 +1,19 @@
 ﻿module  BetterAkkling.Better
 
+type private ActorState = {
+    onRestart: Option<obj -> exn -> unit>
+}
+with
+    static member Default = {
+        onRestart = None
+    }
+
 type Action<'Type, 'Result> =
     private
     | Done of 'Result
     | Simple of (Akkling.Actors.Actor<obj> -> Action<'Type, 'Result>)
     | Msg of (obj -> Action<'Type, 'Result>)
+    | StateUpdate of (ActorState -> ActorState) * (unit -> Action<'Type, 'Result>)
     | Stop of (unit -> Action<'Type, 'Result>)
 
 let rec private bind (f: 'a -> Action<'t, 'b>) (op: Action<'t, 'a>) : Action<'t, 'b> =
@@ -12,6 +21,7 @@ let rec private bind (f: 'a -> Action<'t, 'b>) (op: Action<'t, 'a>) : Action<'t,
     | Done res -> f res
     | Simple cont -> Simple (cont >> bind f)
     | Msg cont -> Msg (cont >> bind f)
+    | StateUpdate (update, cont) -> StateUpdate (update, cont >> bind f)
     | Stop cont -> Stop (cont >> bind f)
 
 type ActorBuilder () =
@@ -24,7 +34,6 @@ type ActorBuilder () =
 
 let actor = ActorBuilder ()
 
-type private ActorState () = class end
 
 type Props<'Type> = {
     dispatcher: Option<string>
@@ -49,6 +58,7 @@ type SimpleActor = class end
 let private doSpawnSimple spawnFunc (props: Props<SimpleActor>) =
 
     let runActor (ctx: Akkling.Actors.Actor<obj>) =
+
         let rec handleNextAction state program =
             match program with
             | Stop _
@@ -58,12 +68,22 @@ let private doSpawnSimple spawnFunc (props: Props<SimpleActor>) =
                 handleNextAction state (next ctx)
             | Msg next ->
                 Akkling.Spawn.become (handleMessage state next)
+            | StateUpdate (update, next) ->
+                handleNextAction (update state) (next ())
 
-        and handleMessage state next msg =
-            //TODO: handle system messages
+        and handleMessage state next (msg: obj) =
+            match msg with
+            | :? Akkling.Actors.LifecycleEvent as evt ->
+                match evt with
+                | Akkling.Actors.PreRestart(exn, msg) ->
+                    state.onRestart |> Option.iter (fun f -> f msg exn)
+                | _ -> ()
+            | _ ->
+                ()
+
             handleNextAction state (next msg)
 
-        handleNextAction (ActorState ()) props.program
+        handleNextAction ActorState.Default props.program
 
     Akkling.ActorRefs.retype <| spawnFunc {
         Akkling.Props.props runActor with
@@ -123,3 +143,6 @@ let scheduleRepeatedly delay interval receiver msg =
     Simple (fun ctx -> Done (ctx.ScheduleRepeatedly delay interval receiver msg))
 
 let select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
+
+let setOnRestart handler = StateUpdate ((fun state -> {state with onRestart = Some handler}), Done)
+let clearOnRestart () = StateUpdate ((fun state -> {state with onRestart = None}), Done)

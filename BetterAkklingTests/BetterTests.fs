@@ -97,7 +97,7 @@ let ``stop action stops the actor`` () =
             Better.actor {
                 let! _msg = Better.receiveOnly<Msg> ()
                 do! Better.stop ()
-                // The actor will stop on the previous line so this message should never be sent
+                // The actor should stop on the previous line so this message should never be sent
                 Akkling.ActorRefs.typed probe <! "should not get this"
             }
         let act = Better.spawnAnonymous tk.Sys (Better.props <| handle ())
@@ -403,3 +403,74 @@ let ``select get's the correct selection`` () =
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
+
+type CrashMsg = {
+    msg: obj
+    err: obj
+}
+
+[<Test>]
+let ``crash handler is invoked if actor crashes`` () =
+    Akkling.TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () = Better.actor {
+            let! _  = Better.receiveAny ()
+            return! handle ()
+        }
+
+        let crashStart = Better.actor {
+            do! Better.setOnRestart (fun msg err ->
+                Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
+            )
+            return! handle()
+        }
+
+        let start = Better.actor {
+            let! crasher = Better.createChild (fun f -> Better.spawn f "crasher" (Better.props crashStart))
+            Akkling.ActorRefs.typed probe <! crasher
+            return! handle ()
+        }
+        let _parent = Better.spawn tk.Sys "parent" {
+            Better.props start with
+                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+
+        let crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
+        Akkling.ActorRefs.retype crasher <! Akka.Actor.Kill.Instance
+        let res = probe.ExpectMsg<CrashMsg>()
+        res.msg :?> Akka.Actor.Kill |> ignore
+        res.err :?> Akka.Actor.ActorKilledException |> ignore
+
+[<Test>]
+let ``crash handler is not invoked if handler is cleared`` () =
+    Akkling.TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () = Better.actor {
+            let! _  = Better.receiveAny ()
+            return! handle ()
+        }
+
+        let crashStart = Better.actor {
+            do! Better.setOnRestart (fun msg err ->
+                Akkling.ActorRefs.typed probe <! {msg = msg; err = err}
+            )
+            do! Better.clearOnRestart ()
+            return! handle()
+        }
+
+        let start = Better.actor {
+            let! crasher = Better.createChild (fun f -> Better.spawn f "crasher" (Better.props crashStart))
+            Akkling.ActorRefs.typed probe <! crasher
+            return! handle ()
+        }
+        let _parent = Better.spawn tk.Sys "parent" {
+            Better.props start with
+                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+
+        let crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
+        Akkling.ActorRefs.retype crasher <! Akka.Actor.Kill.Instance
+        probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+
