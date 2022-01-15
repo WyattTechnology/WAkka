@@ -1,12 +1,10 @@
-﻿module BetterAkkling.Actions
+﻿namespace BetterAkkling
 
+open System
 open Akkling
 
 open Core
 open Props
-
-let getActor () = Simple (fun ctx -> Done (retype ctx.Self))
-let unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
 
 type Logger internal (ctx:Actor<obj>) =
     member _.Log level msg = Logging.log level ctx msg
@@ -21,41 +19,101 @@ type Logger internal (ctx:Actor<obj>) =
     member _.Error msg = Logging.logError ctx msg
     member _.Errorf = Logging.logErrorf ctx
 
-let getLogger () = Simple (fun ctx -> Done (Logger ctx))
+type private Timeout = {started: DateTime}
 
-let stop () = Stop Done
 
-let receiveAny () : Action<SimpleActor, obj> = Msg Done
-let rec receiveOnly<'Msg> () : Action<SimpleActor, 'Msg> = actor {
-    match! receiveAny () with
-    | :? 'Msg as m -> return m
-    | _ -> return! receiveOnly<'Msg> ()
-}
-let getSender () = Simple (fun ctx -> Done (ctx.Sender ()))
+type Actions private () =
+    static let doReceive () : Action<SimpleActor, obj> = Msg Done
+    static let doSchedule delay receiver msg = Simple (fun ctx -> Done (ctx.Schedule delay receiver msg))
 
-let createChild (make: Akka.Actor.IActorRefFactory -> ActorRefs.IActorRef<'Msg>) =
-    Simple (fun ctx -> Done (make ctx))
+    static member  getActor () = Simple (fun ctx -> Done (retype ctx.Self))
+    static member unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
 
-let stash () = Simple (fun ctx -> Done (ctx.Stash ()))
-let unstashOne () = Simple (fun ctx -> Done (ctx.Unstash ()))
-let unstashAll () = Simple (fun ctx -> Done (ctx.UnstashAll ()))
+    static member getLogger () = Simple (fun ctx -> Done (Logger ctx))
 
-let watch act = Simple (fun ctx -> Done (ctx.Watch (ActorRefs.untyped act) |> ignore))
-let unwatch act = Simple (fun ctx -> Done (ctx.Unwatch (ActorRefs.untyped act) |> ignore))
+    static member stop () = Stop Done
 
-let schedule delay receiver msg = Simple (fun ctx -> Done (ctx.Schedule delay receiver msg))
-let scheduleRepeatedly delay interval receiver msg =
-    Simple (fun ctx -> Done (ctx.ScheduleRepeatedly delay interval receiver msg))
+    static member receive (choose: obj -> Option<'Msg>) =
+        let rec recv () = actor {
+            match! doReceive () with
+            | :? Timeout ->
+                return! recv ()
+            | msg ->
+                match choose msg with
+                | Some res ->
+                    return res
+                | None ->
+                    return! recv ()
+        }
+        recv ()
 
-let select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
+    static member receive (choose: obj -> Option<'Msg>, timeout: TimeSpan) =
+        let rec recv started (cancel: Akka.Actor.ICancelable) = actor {
+            match! doReceive () with
+            | :? Timeout as timeout ->
+                if timeout.started = started then
+                    return None
+                else
+                    return! recv started cancel
+            | msg ->
+                match choose msg with
+                | Some res ->
+                    cancel.Cancel()
+                    return (Some res)
+                | None ->
+                    return! recv started cancel
+        }
+        actor {
+            let now = DateTime.Now
+            let! self = Actions.getActor ()
+            let! cancel = doSchedule timeout (retype self) {started = now}
+            return! recv now cancel
+        }
 
-let setRestartHandler handler = RestartHandlerUpdate (Some handler, Done)
-let clearRestartHandler () = RestartHandlerUpdate (None, Done)
+    static member receiveAny () = Actions.receive Some
+    static member receiveAny (timeout: TimeSpan) = Actions.receive(Some, timeout)
 
-type PersistResult<'Result> =
-    | Persist of 'Result
-    | NoPersist of 'Result
+    static member receiveOnly<'Msg> () : Action<SimpleActor, 'Msg> =
+        Actions.receive (fun msg ->
+            match msg with
+            | :? 'Msg as m -> Some m
+            | _ -> None
+        )
+    static member receiveOnly<'Msg> (timeout: TimeSpan) : Action<SimpleActor, Option<'Msg>> =
+        Actions.receive (
+            (fun msg ->
+                match msg with
+                | :? 'Msg as m -> Some m
+                | _ -> None
+            ),
+            timeout
+        )
 
-let persist (_action: Action<SimpleActor, PersistResult<'Result>>) : Action<PersistentActor, 'Result> = actor {
-    return Unchecked.defaultof<_>
-}
+    static member getSender () = Simple (fun ctx -> Done (ctx.Sender ()))
+
+    static member createChild (make: Akka.Actor.IActorRefFactory -> ActorRefs.IActorRef<'Msg>) =
+        Simple (fun ctx -> Done (make ctx))
+
+    static member stash () = Simple (fun ctx -> Done (ctx.Stash ()))
+    static member unstashOne () = Simple (fun ctx -> Done (ctx.Unstash ()))
+    static member unstashAll () = Simple (fun ctx -> Done (ctx.UnstashAll ()))
+
+    static member watch act = Simple (fun ctx -> Done (ctx.Watch (ActorRefs.untyped act) |> ignore))
+    static member unwatch act = Simple (fun ctx -> Done (ctx.Unwatch (ActorRefs.untyped act) |> ignore))
+
+    static member schedule delay receiver msg = doSchedule delay receiver msg
+    static member scheduleRepeatedly delay interval receiver msg =
+        Simple (fun ctx -> Done (ctx.ScheduleRepeatedly delay interval receiver msg))
+
+    static member select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
+
+    static member setRestartHandler handler = RestartHandlerUpdate (Some handler, Done)
+    static member clearRestartHandler () = RestartHandlerUpdate (None, Done)
+
+//type PersistResult<'Result> =
+//    | Persist of 'Result
+//    | NoPersist of 'Result
+//
+//let persist (_action: Action<SimpleActor, PersistResult<'Result>>) : Action<PersistentActor, 'Result> = actor {
+//    return Unchecked.defaultof<_>
+//}
