@@ -18,8 +18,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Compile Include="NotPersistentTests.fs" />
-      <Compile Include="InMemoryPeristentTests.fs" />
+      <Compile Include="NotPersistedTests.fs" />
+      <Compile Include="CheckpointedTests.fs" />
     </ItemGroup>
 
 </Project>

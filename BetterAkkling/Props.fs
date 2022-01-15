@@ -3,12 +3,23 @@
 open Core
 
 type SimpleActor = class end
-type PersistentActor = class end
+type EventSourcedActor<'Snapshotting> = class end
+type NoSnapshotting = class end
+type WithSnapshotting<'SnapshotType> = class end
 
-type ActorType =
-    | NotPersistent of Action<SimpleActor, unit>
-    | InMemoryPersistent of Action<SimpleActor, unit>
-    | ProcessPersistent of Action<PersistentActor, unit>
+type ActorType<'SnapshotType> =
+    internal
+    | NotPersisted of Action<SimpleActor, unit>
+    | Checkpointed of Action<SimpleActor, unit>
+    | EventSourced of Action<EventSourcedActor<NoSnapshotting>, unit>
+    | EventSourcedWithSnapshots of
+        initialSnapshot:'SnapshotType * action: ('SnapshotType -> Action<EventSourcedActor<WithSnapshotting<'SnapshotType>>, unit>)
+
+let notPersisted action : ActorType<unit> = NotPersisted action
+let checkpointed action : ActorType<unit> = Checkpointed action
+let eventSourced action : ActorType<unit> = EventSourced action
+let eventSourcedWithSnapshots (initialSnapshot: 'SnapshotType) action : ActorType<'SnapshotType> =
+    EventSourcedWithSnapshots (initialSnapshot, action)
 
 type Props = {
     name: Option<string>

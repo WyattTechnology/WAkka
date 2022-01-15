@@ -3,8 +3,8 @@
 open System
 open Akkling
 
+open BetterAkkling.Props
 open Core
-open Props
 
 type Logger internal (ctx:Actor<obj>) =
     member _.Log level msg = Logging.log level ctx msg
@@ -20,7 +20,6 @@ type Logger internal (ctx:Actor<obj>) =
     member _.Errorf = Logging.logErrorf ctx
 
 type private Timeout = {started: DateTime}
-
 
 type Actions private () =
     static let doReceive () : Action<SimpleActor, obj> = Msg Done
@@ -110,10 +109,11 @@ type Actions private () =
     static member setRestartHandler handler = RestartHandlerUpdate (Some handler, Done)
     static member clearRestartHandler () = RestartHandlerUpdate (None, Done)
 
-//type PersistResult<'Result> =
-//    | Persist of 'Result
-//    | NoPersist of 'Result
-//
-//let persist (_action: Action<SimpleActor, PersistResult<'Result>>) : Action<PersistentActor, 'Result> = actor {
-//    return Unchecked.defaultof<_>
-//}
+    static member persist (action: Action<SimpleActor, 'Result>): Action<EventSourcedActor<'Snapshotting>, 'Result> = actor {
+        return Unchecked.defaultof<_>
+    }
+
+    static member snapshot (snapshot: 'Snapshot): Action<EventSourcedActor<WithSnapshotting<'Snapshot>>, unit> = actor {
+        return Unchecked.defaultof<_>
+    }
+

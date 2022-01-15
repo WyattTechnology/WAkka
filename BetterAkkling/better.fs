@@ -4,10 +4,11 @@
 type RestartHandler = Core.RestartHandler
 let actor = Core.actor
 
-type ActorType = Props.ActorType
-let NotPersistent = Props.NotPersistent
-let InMemoryPersistent = Props.InMemoryPersistent
-let ProcessPersistent = Props.ProcessPersistent
+type ActorType<'Snapshot> = Props.ActorType<'Snapshot>
+let notPersisted = Props.notPersisted
+let checkpointed = Props.checkpointed
+let eventSourced = Props.eventSourced
+let eventSourcedWithSnapshots =  Props.eventSourcedWithSnapshots
 
 type Props = Props.Props
 

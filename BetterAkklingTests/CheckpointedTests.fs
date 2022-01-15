@@ -1,4 +1,4 @@
-﻿module BetterAkklingTests.NotPersistentTests
+﻿module BetterAkklingTests.CheckpointedTests
 
 open System
 
@@ -22,7 +22,7 @@ let ``spawn with name`` () =
                 typed probe <! msg
                 return! handle ()
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         let m1 = {value = 1234}
         act <! m1
@@ -46,7 +46,7 @@ let ``spawn with no name`` () =
                 typed probe <! msg
                 return! handle ()
             }
-        let act = Better.spawn tk.Sys Better.Props.Anonymous (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys Better.Props.Anonymous (Better.checkpointed <| handle ())
 
         let m1 = {value = 1234}
         act <! m1
@@ -69,7 +69,7 @@ let ``get actor gives correct actor ref`` () =
                 let! act = Actions.getActor ()
                 typed probe <! act
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         probe.ExpectMsg act |> ignore
 
@@ -83,7 +83,7 @@ let ``get actor context gives correct actor`` () =
                 let! act = Actions.unsafeGetActorCtx ()
                 typed probe <! act.Self
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         probe.ExpectMsg act |> ignore
 
@@ -100,7 +100,7 @@ let ``stop action stops the actor`` () =
                 // The actor should stop on the previous line so this message should never be sent
                 typed probe <! "should not get this"
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -125,7 +125,7 @@ let ``create actor can create an actor`` () =
                 typed probe <! newAct
             }
         let act : IActorRef<Msg> =
-            Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+            Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
         let actObj : IActorRef<obj> = retype act
 
         probe.ExpectMsg actObj |> ignore
@@ -150,7 +150,7 @@ let ``unstash one only unstashes one message at a time`` () =
                     do! Actions.stash ()
                     return! handle false
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle false)
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle false)
 
         let m1 = {value = 1}
         act <! m1
@@ -191,7 +191,7 @@ let ``unstash all unstashes all the messages`` () =
                     do! Actions.stash ()
                     return! handle false
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle false)
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle false)
 
         let m1 = {value = 1}
         act <! m1
@@ -217,7 +217,7 @@ let ``watch works`` () =
             let! _ = Actions.receiveOnly<string> ()
             return ()
         }
-        let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.NotPersistent <| otherActor ())
+        let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.checkpointed <| otherActor ())
 
         let rec handle () =
             Better.actor {
@@ -233,7 +233,7 @@ let ``watch works`` () =
             typed probe <! ""
             return! handle ()
         }
-        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "" |> ignore
         retype watched <! ""
@@ -248,7 +248,7 @@ let ``unwatch works`` () =
             let! _ = Actions.receiveOnly<string> ()
             return ()
         }
-        let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.NotPersistent <| otherActor ())
+        let watched = Better.spawn tk.Sys (Better.Props.Named "watched") (Better.checkpointed <| otherActor ())
 
         let rec handle () =
             Better.actor {
@@ -268,7 +268,7 @@ let ``unwatch works`` () =
             typed probe <! "watched"
             return! handle ()
         }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "watched" |> ignore
         retype act <! ""
@@ -291,7 +291,7 @@ let ``schedule works`` () =
             typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -319,7 +319,7 @@ let ``scheduled messages can be cancelled`` () =
             typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -345,7 +345,7 @@ let ``schedule repeatedly works`` () =
             typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -378,7 +378,7 @@ let ``get sender get's the correct actor`` () =
                 typed probe <! untyped sender
                 return! handle ()
             }
-        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent <| handle ())
+        let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
@@ -400,7 +400,7 @@ let ``select get's the correct selection`` () =
             let! selection = Actions.select path
             typed probe <! selection
         }
-        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.NotPersistent start)
+        let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -434,7 +434,7 @@ let ``crash handler is invoked if actor crashes`` () =
         let start = Better.actor {
             let! crasher =
                 Actions.createChild (fun f ->
-                    Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
+                    Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
             typed probe <! crasher
             return! handle ()
@@ -443,7 +443,7 @@ let ``crash handler is invoked if actor crashes`` () =
             Better.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Better.spawn tk.Sys parentProps (Better.NotPersistent start)
+        let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
 
         let crasher = probe.ExpectMsg<IActorRef<obj>> ()
         retype crasher <! "crash it"
@@ -478,7 +478,7 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
         let start = Better.actor {
             let! crasher =
                 Actions.createChild (fun f ->
-                    Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
+                    Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
             typed probe <! crasher
             return! handle ()
@@ -487,7 +487,7 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
             Better.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Better.spawn tk.Sys parentProps (Better.NotPersistent start)
+        let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
 
         let _crasher = probe.ExpectMsg<IActorRef<obj>> ()
         let _res = probe.ExpectMsg<CrashMsg>()
@@ -514,7 +514,7 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let start = Better.actor {
             let! crasher =
                 Actions.createChild (fun f ->
-                    Better.spawn f (Better.Props.Named "crasher") (Better.NotPersistent crashStart)
+                    Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
             typed probe <! crasher
             return! handle ()
@@ -523,9 +523,59 @@ let ``crash handler is not invoked if handler is cleared`` () =
             Better.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Better.spawn tk.Sys parentProps (Better.NotPersistent start)
+        let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
 
         let crasher = probe.ExpectMsg<IActorRef<obj>> ()
         retype crasher <! Akka.Actor.Kill.Instance
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+
+[<Test>]
+let ``state is recovered after a crash`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec crashHandle recved = Better.actor {
+            let! msg = Actions.receiveOnly<string>()
+            let newRecved = msg :: recved
+            typed probe <! String.concat "," newRecved
+            return! crashHandle newRecved
+        }
+        let crashStart = Better.actor {
+            do! Actions.setRestartHandler (fun msg err ->
+                typed probe <! {msg = msg; err = err}
+            )
+            return! crashHandle []
+        }
+
+        let rec handle () = Better.actor {
+            let! _  = Actions.receiveAny ()
+            return! handle ()
+        }
+
+        let start = Better.actor {
+            let! crasher =
+                Actions.createChild (fun f ->
+                    Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
+                )
+            typed probe <! crasher
+            return! handle ()
+        }
+        let parentProps = {
+            Better.Props.Named "parent" with
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
+
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
+        let msg1 = "1"
+        crasher <! msg1
+        probe.ExpectMsg msg1 |> ignore
+        let msg2 = "2"
+        crasher <! msg2
+        probe.ExpectMsg $"{msg2},{msg1}"|> ignore
+        retype crasher <! Akka.Actor.Kill.Instance
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg3 = "3"
+        crasher <! msg3
+        probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
 
