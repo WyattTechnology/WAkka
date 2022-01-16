@@ -109,11 +109,18 @@ type Actions private () =
     static member setRestartHandler handler = RestartHandlerUpdate (Some handler, Done)
     static member clearRestartHandler () = RestartHandlerUpdate (None, Done)
 
+    static member private persistObj (action: Action<SimpleActor, obj>): Action<EventSourcedActor<'Snapshotting>, obj> =
+        Persist (action, Done)
+
     static member persist (action: Action<SimpleActor, 'Result>): Action<EventSourcedActor<'Snapshotting>, 'Result> = actor {
-        return Unchecked.defaultof<_>
+        let! evt = Actions.persistObj (actor {
+            let! res = action
+            return (res :> obj)
+        })
+        return (evt :?> 'Result)
     }
 
-    static member snapshot (snapshot: 'Snapshot): Action<EventSourcedActor<WithSnapshotting<'Snapshot>>, unit> = actor {
+    static member snapshot (snapshot: 'Snapshot): Action<EventSourcedActor<WithSnapshotting<'Snapshot>>, 'Result> = actor {
         return Unchecked.defaultof<_>
     }
 

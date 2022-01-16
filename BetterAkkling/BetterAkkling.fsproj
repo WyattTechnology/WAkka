@@ -24,6 +24,7 @@
     <ItemGroup>
       <PackageReference Include="Akkling" Version="0.12.0" />
       <PackageReference Update="FSharp.Core" Version="6.0.1" />
+      <PackageReference Include="Akkling.Persistence" Version="0.12.0" />
     </ItemGroup>
 
 </Project>

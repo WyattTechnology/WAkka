@@ -18,7 +18,13 @@ let ``spawn with name`` () =
 
         let rec handle () =
             Better.actor {
-                let! msg = Actions.receiveOnly<Msg> ()
+                let! msg =
+                    let rec getMsg () = Better.actor {
+                        match! Actions.receiveAny () with
+                        | :? Msg as msg -> return msg
+                        | _ -> return! getMsg ()
+                    }
+                    getMsg ()
                 typed probe <! msg
                 return! handle ()
             }

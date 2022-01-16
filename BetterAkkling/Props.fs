@@ -2,11 +2,6 @@
 
 open Core
 
-type SimpleActor = class end
-type EventSourcedActor<'Snapshotting> = class end
-type NoSnapshotting = class end
-type WithSnapshotting<'SnapshotType> = class end
-
 type ActorType<'SnapshotType> =
     internal
     | NotPersisted of Action<SimpleActor, unit>

@@ -2,18 +2,22 @@
 
 open Akkling
 
+open Akkling.Persistence
+open BetterAkkling.Core
+open BetterAkkling.Props
+
 open Core
-open Props
 
 module private Simple =
-    type Start<'ActorType, 'Result> = {
-        checkpoint: Option<obj -> Action<'ActorType, 'Result>>
+
+    type Start<'Result> = {
+        checkpoint: Option<obj -> Action<SimpleActor, 'Result>>
         restartHandler: Option<RestartHandler>
     }
 
     type RestartHandlerMsg = RestartHandlerMsg
 
-    let doSpawn spawnFunc (props: Props) (persist: bool) (action: Action<'ActorType, 'Result>) =
+    let doSpawn spawnFunc (props: Props) (persist: bool) (action: Action<SimpleActor, unit>) =
 
         let runActor (ctx: Actors.Actor<obj>) =
 
@@ -22,10 +26,10 @@ module private Simple =
                 | PreRestart(exn, msg) ->
                     restartHandler |> Option.iter (fun f -> f msg exn)
                     if persist then
-                        let start : Start<'ActorType, 'Result> = {checkpoint = checkpoint; restartHandler = restartHandler}
+                        let start : Start<'Result> = {checkpoint = checkpoint; restartHandler = restartHandler}
                         retype ctx.Self <! start
                     else
-                        let start : Start<'ActorType, 'Result> = {checkpoint = None; restartHandler = None}
+                        let start : Start<'Result> = {checkpoint = None; restartHandler = None}
                         retype ctx.Self <! start
                 | _ ->
                     ()
@@ -40,6 +44,9 @@ module private Simple =
                     handleNextAction restartHandler checkpoint (next ctx)
                 | Msg next ->
                     become (waitForMessage restartHandler next)
+                | Persist _ ->
+                    logError ctx "Got persist action in simple actor"
+                    stop ()
                 | RestartHandlerUpdate (newHandler, next) ->
                     ActorRefs.retype ctx.Self <! RestartHandlerMsg
                     become (waitForNewHandler newHandler checkpoint next)
@@ -51,7 +58,7 @@ module private Simple =
                     handleNextAction restartHandler checkpoint (next ())
                 | :? LifecycleEvent as evt ->
                     handleLifecycle restartHandler checkpoint evt
-                | :? Start<'ActorType, 'Result> ->
+                | :? Start<unit> ->
                     ignored ()
                 | _ ->
                     ctx.Stash ()
@@ -61,7 +68,7 @@ module private Simple =
                 match msg with
                 | :? LifecycleEvent as evt ->
                     handleLifecycle restartHandler (Some next) evt
-                | :? Start<'ActorType, 'Result> ->
+                | :? Start<unit> ->
                     ignored ()
                 | _ ->
                     handleNextAction restartHandler (Some next) (next msg)
@@ -72,7 +79,7 @@ module private Simple =
                     let handler = fun msg exn ->
                         Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
                     handleLifecycle (Some handler) None evt
-                | :? Start<'ActorType, 'Result> as start ->
+                | :? Start<unit> as start ->
                     ctx.UnstashAll ()
                     match start.checkpoint with
                     | None ->
@@ -93,9 +100,141 @@ module private Simple =
                 Router = props.router
                 SupervisionStrategy = props.supervisionStrategy
         }
-        let start : Start<'ActorType, 'Result> = {checkpoint = None; restartHandler = None}
+        let start : Start<unit> = {checkpoint = None; restartHandler = None}
         retype act <! start
         retype act
+
+module private EventSourced =
+
+    type RestartHandlerMsg = RestartHandlerMsg
+
+    type Persisted = {evt: obj}
+
+    let doSpawn spawnFunc (props: Props) (action: Action<EventSourcedActor<NoSnapshotting>, unit>) =
+
+        let runActor (ctx: Eventsourced<obj>) =
+
+            let handleLifecycle restartHandler evt =
+                match evt with
+                | PreRestart(exn, msg) ->
+                    restartHandler |> Option.iter (fun f -> f msg exn)
+                | _ ->
+                    ()
+                ignored ()
+
+            let waitForNewHandler restartHandler cont (msg: obj) =
+                match msg with
+                | :? RestartHandlerMsg ->
+                    ctx.UnstashAll ()
+                    cont ()
+                | :? LifecycleEvent as evt ->
+                    handleLifecycle restartHandler evt
+                | _ ->
+                    ctx.Stash ()
+                    ignored ()
+
+            let rec handleNextAction restartHandler (action: Action<EventSourcedActor<NoSnapshotting>, unit>) =
+                match action with
+                | Stop _
+                | Done _ ->
+                    stop ()
+                | Simple next ->
+                    handleNextAction restartHandler (next ctx)
+                | Msg _ ->
+                    logError ctx "Got Msg in persistent workflow"
+                    stop ()
+                | Persist (action, next) ->
+                    handleNextSubAction restartHandler next action
+                | RestartHandlerUpdate (newHandler, next) ->
+                    ActorRefs.retype ctx.Self <! RestartHandlerMsg
+                    become (waitForNewHandler newHandler (fun () -> handleNextAction newHandler (next ())))
+
+            and handleNextSubAction restartHandler cont action =
+                match action with
+                | Stop _ ->
+                    stop ()
+                | Done evt ->
+                    (become (waitForEvent restartHandler cont)
+                        <@> (Akkling.Persistence.Persist ({evt = evt} :> obj)))
+                | Simple next ->
+                    handleNextSubAction restartHandler cont (next ctx)
+                | Msg next ->
+                    become (waitForMessage restartHandler cont next)
+                | Persist _ ->
+                    logError ctx "Got persist in simple actor"
+                    stop ()
+                | RestartHandlerUpdate (newHandler, next) ->
+                    ActorRefs.retype ctx.Self <! RestartHandlerMsg
+                    become (waitForNewHandler newHandler (fun () -> handleNextSubAction newHandler cont (next ())))
+
+            and waitForMessage restartHandler cont next (msg: obj) =
+                match msg with
+                | :? LifecycleEvent as evt ->
+                    handleLifecycle restartHandler evt
+                | _ ->
+                    handleNextSubAction restartHandler cont (next msg)
+
+            and waitForEvent restartHandler next (msg: obj) =
+                match msg with
+                | :? LifecycleEvent as evt ->
+                    handleLifecycle restartHandler evt
+                | :? Persisted as persisted ->
+                    handleNextAction restartHandler (next persisted.evt)
+                | _ ->
+                    ignored ()
+
+            let rec handleNextRecoveryAction restartHandler (action: Action<EventSourcedActor<NoSnapshotting>, unit>) =
+                match action with
+                | Stop _
+                | Done _ ->
+                    stop ()
+                | Simple next ->
+                    handleNextRecoveryAction restartHandler (next ctx)
+                | Msg _ ->
+                    logError ctx "Got Msg in persistent workflow"
+                    stop ()
+                | Persist (subAction, next) ->
+                    become (waitForRecoveryEvent restartHandler subAction next)
+                | RestartHandlerUpdate (newHandler, next) ->
+                    ActorRefs.retype ctx.Self <! RestartHandlerMsg
+                    become (waitForNewHandler newHandler (fun () -> handleNextRecoveryAction newHandler (next ())))
+
+            and waitForRecoveryEvent restartHandler subAction next (msg:obj) =
+                match msg with
+                | :? LifecycleEvent as evt ->
+                    handleLifecycle restartHandler evt
+                | :? Persisted as persisted ->
+                    handleNextRecoveryAction restartHandler (next persisted.evt)
+                | PersistentLifecycleEvent ReplaySucceed ->
+                    handleNextSubAction restartHandler next subAction
+                | _ ->
+                    ignored ()
+
+            let initRestartHandler = Some (fun msg exn ->
+                Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
+            )
+
+            let waitForStart (msg: obj) =
+                match msg with
+                | :? LifecycleEvent as evt ->
+                    match evt with
+                    | PreStart ->
+                        handleNextRecoveryAction initRestartHandler action
+                    | _ ->
+                        handleLifecycle initRestartHandler evt
+                | _ ->
+                    ignored ()
+
+            become waitForStart
+
+        retype (spawnFunc {
+            propsPersist runActor with
+                Dispatcher = props.dispatcher
+                Mailbox = props.mailbox
+                Deploy = props.deploy
+                Router = props.router
+                SupervisionStrategy = props.supervisionStrategy
+        })
 
 let spawn parent props actorType =
     match props.name, actorType with
@@ -107,10 +246,10 @@ let spawn parent props actorType =
         Simple.doSpawn (Spawn.spawn parent name) props true action
     | None, Checkpointed action ->
         Simple.doSpawn (Spawn.spawnAnonymous parent) props true action
-    | Some _name, EventSourced _action ->
-        failwith "Not supported yet"
-    | None, EventSourced _action ->
-        failwith "Not supported yet"
+    | Some name, EventSourced action ->
+        EventSourced.doSpawn (Spawn.spawn parent name) props action
+    | None, EventSourced action ->
+        EventSourced.doSpawn (Spawn.spawnAnonymous parent) props action
     | Some _name, EventSourcedWithSnapshots (_init, _action) ->
         failwith "Not supported yet"
     | None, EventSourcedWithSnapshots (_init, _action) ->
