@@ -10,8 +10,8 @@ open Core
 
 module private Simple =
 
-    type Start<'Result> = {
-        checkpoint: Option<obj -> Action<SimpleActor, 'Result>>
+    type Start = {
+        checkpoint: Option<obj -> Action<SimpleActor, unit>>
         restartHandler: Option<RestartHandler>
     }
 
@@ -26,11 +26,9 @@ module private Simple =
                 | PreRestart(exn, msg) ->
                     restartHandler |> Option.iter (fun f -> f msg exn)
                     if persist then
-                        let start : Start<'Result> = {checkpoint = checkpoint; restartHandler = restartHandler}
-                        retype ctx.Self <! start
+                        retype ctx.Self <! {checkpoint = checkpoint; restartHandler = restartHandler}
                     else
-                        let start : Start<'Result> = {checkpoint = None; restartHandler = None}
-                        retype ctx.Self <! start
+                        retype ctx.Self <! {checkpoint = None; restartHandler = None}
                 | _ ->
                     ()
                 ignored ()
@@ -58,7 +56,7 @@ module private Simple =
                     handleNextAction restartHandler checkpoint (next ())
                 | :? LifecycleEvent as evt ->
                     handleLifecycle restartHandler checkpoint evt
-                | :? Start<unit> ->
+                | :? Start ->
                     ignored ()
                 | _ ->
                     ctx.Stash ()
@@ -68,7 +66,7 @@ module private Simple =
                 match msg with
                 | :? LifecycleEvent as evt ->
                     handleLifecycle restartHandler (Some next) evt
-                | :? Start<unit> ->
+                | :? Start ->
                     ignored ()
                 | _ ->
                     handleNextAction restartHandler (Some next) (next msg)
@@ -79,7 +77,7 @@ module private Simple =
                     let handler = fun msg exn ->
                         Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
                     handleLifecycle (Some handler) None evt
-                | :? Start<unit> as start ->
+                | :? Start as start ->
                     ctx.UnstashAll ()
                     match start.checkpoint with
                     | None ->
@@ -100,8 +98,7 @@ module private Simple =
                 Router = props.router
                 SupervisionStrategy = props.supervisionStrategy
         }
-        let start : Start<unit> = {checkpoint = None; restartHandler = None}
-        retype act <! start
+        retype act <! {checkpoint = None; restartHandler = None}
         retype act
 
 module private EventSourced =
