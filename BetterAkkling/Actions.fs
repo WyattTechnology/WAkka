@@ -3,6 +3,7 @@
 open System
 open Akkling
 
+open BetterAkkling.Core
 open BetterAkkling.Props
 open Core
 
@@ -25,7 +26,7 @@ type Actions private () =
     static let doReceive () : Action<SimpleActor, obj> = Msg Done
     static let doSchedule delay receiver msg = Simple (fun ctx -> Done (ctx.Schedule delay receiver msg))
 
-    static member  getActor () = Simple (fun ctx -> Done (retype ctx.Self))
+    static member getActor () = Simple (fun ctx -> Done (retype ctx.Self))
     static member unsafeGetActorCtx () = Simple (fun ctx -> Done ctx)
 
     static member getLogger () = Simple (fun ctx -> Done (Logger ctx))
@@ -93,9 +94,11 @@ type Actions private () =
     static member createChild (make: Akka.Actor.IActorRefFactory -> ActorRefs.IActorRef<'Msg>) =
         Simple (fun ctx -> Done (make ctx))
 
-    static member stash () = Simple (fun ctx -> Done (ctx.Stash ()))
-    static member unstashOne () = Simple (fun ctx -> Done (ctx.Unstash ()))
-    static member unstashAll () = Simple (fun ctx -> Done (ctx.UnstashAll ()))
+    static member send (recv: IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, untyped ctx.Self)))
+
+    static member stash () : Action<SimpleActor, unit> = Simple (fun ctx -> Done (ctx.Stash ()))
+    static member unstashOne () : Action<SimpleActor, unit> = Simple (fun ctx -> Done (ctx.Unstash ()))
+    static member unstashAll () : Action<SimpleActor, unit> = Simple (fun ctx -> Done (ctx.UnstashAll ()))
 
     static member watch act = Simple (fun ctx -> Done (ctx.Watch (ActorRefs.untyped act) |> ignore))
     static member unwatch act = Simple (fun ctx -> Done (ctx.Unwatch (ActorRefs.untyped act) |> ignore))
@@ -124,3 +127,6 @@ type Actions private () =
         return Unchecked.defaultof<_>
     }
 
+[<AutoOpen>]
+module Ops =
+    let (<!) (recv: IActorRef<'Msg>) msg = Actions.send recv msg

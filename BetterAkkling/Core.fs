@@ -1,5 +1,6 @@
 ﻿module BetterAkkling.Core
 
+open System
 open Akkling
 
 type RestartHandler = obj -> exn -> unit

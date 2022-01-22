@@ -19,20 +19,20 @@ let ``spawn with name`` () =
         let rec handle () =
             Better.actor {
                 let! msg = Actions.receiveOnly<Msg> ()
-                typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         let m1 = {value = 1234}
-        act <! m1
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m1 |> ignore
 
-        retype act <! "testing 1 2 3"
+        (retype act).Tell("testing 1 2 3", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 12345}
-        act <! m2
+        act.Tell(m2, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m2 |> ignore
 
 [<Test>]
@@ -43,20 +43,20 @@ let ``spawn with no name`` () =
         let rec handle () =
             Better.actor {
                 let! msg = Actions.receiveOnly<Msg> ()
-                typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
         let act = Better.spawn tk.Sys Better.Props.Anonymous (Better.checkpointed <| handle ())
 
         let m1 = {value = 1234}
-        act <! m1
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m1 |> ignore
 
-        retype act <! "testing 1 2 3"
+        (retype act).Tell("testing 1 2 3", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 12345}
-        act <! m2
+        act.Tell(m2, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m2 |> ignore
 
 [<Test>]
@@ -67,7 +67,7 @@ let ``get actor gives correct actor ref`` () =
         let rec handle () =
             Better.actor {
                 let! act = Actions.getActor ()
-                typed probe <! act
+                do! typed probe <! act
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
@@ -81,7 +81,7 @@ let ``get actor context gives correct actor`` () =
         let rec handle () =
             Better.actor {
                 let! act = Actions.unsafeGetActorCtx ()
-                typed probe <! act.Self
+                do! typed probe <! act.Self
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
@@ -98,13 +98,13 @@ let ``stop action stops the actor`` () =
                 let! _msg = Actions.receiveOnly<Msg> ()
                 do! Actions.stop ()
                 // The actor should stop on the previous line so this message should never be sent
-                typed probe <! "should not get this"
+                do! typed probe <! "should not get this"
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
-        act <! m1
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         tk.ExpectTerminated (untyped act) |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
@@ -118,11 +118,11 @@ let ``create actor can create an actor`` () =
                 let! self = Actions.getActor ()
                 let! newAct = Actions.createChild (fun parent ->
                     let ctx = parent :?> Actor<obj>
-                    typed probe <! ctx.Self
+                    (typed probe).Tell (ctx.Self, untyped ctx.Self)
                     let typed : IActorRef<Msg> = retype self
                     typed
                 )
-                typed probe <! newAct
+                do! typed probe <! newAct
             }
         let act : IActorRef<Msg> =
             Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
@@ -140,11 +140,11 @@ let ``unstash one only unstashes one message at a time`` () =
             Better.actor {
                 let! msg = Actions.receiveOnly<Msg> ()
                 if msg.value > 100 then
-                    typed probe <! msg
+                    do! typed probe <! msg
                     do! Actions.unstashOne ()
                     return! handle true
                 elif unstashed then
-                    typed probe <! msg
+                    do! typed probe <! msg
                     return! handle true
                 else
                     do! Actions.stash ()
@@ -153,21 +153,21 @@ let ``unstash one only unstashes one message at a time`` () =
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle false)
 
         let m1 = {value = 1}
-        act <! m1
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 2}
-        act <! m2
+        act.Tell(m2, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m3 = {value = 101}
-        act <! m3
+        act.Tell(m3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m3 |> ignore
         probe.ExpectMsg m1 |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m4 = {value = 102}
-        act <! m4
+        act.Tell(m4, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m4 |> ignore
         probe.ExpectMsg m2 |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -181,11 +181,11 @@ let ``unstash all unstashes all the messages`` () =
             Better.actor {
                 let! msg = Actions.receiveOnly<Msg> ()
                 if msg.value > 100 then
-                    typed probe <! msg
+                    do! typed probe <! msg
                     do! Actions.unstashAll ()
                     return! handle true
                 elif unstashed then
-                    typed probe <! msg
+                    do! typed probe <! msg
                     return! handle true
                 else
                     do! Actions.stash ()
@@ -194,15 +194,15 @@ let ``unstash all unstashes all the messages`` () =
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle false)
 
         let m1 = {value = 1}
-        act <! m1
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 2}
-        act <! m2
+        act.Tell(m2, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m3 = {value = 101}
-        act <! m3
+        act.Tell(m3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg m3 |> ignore
         probe.ExpectMsg m1 |> ignore
         probe.ExpectMsg m2 |> ignore
@@ -223,20 +223,20 @@ let ``watch works`` () =
             Better.actor {
                 match! Actions.receiveAny () with
                 | MessagePatterns.Terminated (act, _, _) ->
-                    typed probe <!  act
+                    do! typed probe <!  act
                     return! Actions.stop ()
                 | _msg ->
                     return! handle ()
             }
         let start = Better.actor {
             do! Actions.watch watched
-            typed probe <! ""
+            do! typed probe <! ""
             return! handle ()
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "" |> ignore
-        retype watched <! ""
+        (retype watched).Tell("", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg watched |> ignore
 
 [<Test>]
@@ -254,26 +254,26 @@ let ``unwatch works`` () =
             Better.actor {
                 match! Actions.receiveAny () with
                 | MessagePatterns.Terminated (act, _, _) ->
-                    typed probe <!  act
+                    do! typed probe <!  act
                     return! Actions.stop ()
                 | :? string ->
                     do! Actions.unwatch watched
-                    typed probe <! "unwatched"
+                    do! typed probe <! "unwatched"
                     return! handle ()
                 | _msg ->
                     return! handle ()
             }
         let start = Better.actor {
             do! Actions.watch watched
-            typed probe <! "watched"
+            do! typed probe <! "watched"
             return! handle ()
         }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
         probe.ExpectMsg "watched" |> ignore
-        retype act <! ""
+        (retype act).Tell("", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg "unwatched" |> ignore
-        retype watched <! ""
+        (retype watched).Tell("", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
@@ -288,7 +288,7 @@ let ``schedule works`` () =
             }
         let start = Better.actor {
             let! _cancel = Actions.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
-            typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
@@ -316,7 +316,7 @@ let ``scheduled messages can be cancelled`` () =
         let start = Better.actor {
             let! cancel = Actions.schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
             cancel.Cancel ()
-            typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
@@ -342,7 +342,7 @@ let ``schedule repeatedly works`` () =
             }
         let start = Better.actor {
             let! _cancel = Actions.scheduleRepeatedly delay interval (typed probe) "message"
-            typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
@@ -375,7 +375,7 @@ let ``get sender get's the correct actor`` () =
             Better.actor {
                 let! _msg = Actions.receiveOnly<string> ()
                 let! sender = Actions.getSender ()
-                typed probe <! untyped sender
+                do! typed probe <! untyped sender
                 return! handle ()
             }
         let act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed <| handle ())
@@ -398,7 +398,7 @@ let ``select get's the correct selection`` () =
             }
         let start = Better.actor {
             let! selection = Actions.select path
-            typed probe <! selection
+            do! typed probe <! selection
         }
         let _act = Better.spawn tk.Sys (Better.Props.Named "test") (Better.checkpointed start)
 
@@ -427,7 +427,7 @@ let ``crash handler is invoked if actor crashes`` () =
         }
         let crashStart = Better.actor {
             do! Actions.setRestartHandler (fun msg err ->
-                typed probe <! {msg = msg; err = err}
+                (typed probe).Tell ({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
             )
             return! crashHandle ()
         }
@@ -436,7 +436,7 @@ let ``crash handler is invoked if actor crashes`` () =
                 Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
-            typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
@@ -446,7 +446,7 @@ let ``crash handler is invoked if actor crashes`` () =
         let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
 
         let crasher = probe.ExpectMsg<IActorRef<obj>> ()
-        retype crasher <! "crash it"
+        (retype crasher).Tell("crash it", Akka.Actor.ActorRefs.NoSender)
         let res = probe.ExpectMsg<CrashMsg>()
         res.msg :?> string |> ignore
         res.err :?> Exception |> ignore
@@ -470,7 +470,7 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
 
         let crashStart = Better.actor {
             do! Actions.setRestartHandler (fun msg err ->
-                typed probe <! {msg = msg; err = err}
+                (typed probe).Tell ({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
             )
             checkCrash ()
             return! handle()
@@ -480,7 +480,7 @@ let ``crash handler is invoked if actor crashes before calling receive`` () =
                 Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
-            typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
@@ -505,7 +505,7 @@ let ``crash handler is not invoked if handler is cleared`` () =
 
         let crashStart = Better.actor {
             do! Actions.setRestartHandler (fun msg err ->
-                typed probe <! {msg = msg; err = err}
+                (typed probe).Tell ({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
             )
             do! Actions.clearRestartHandler ()
             return! handle()
@@ -516,7 +516,7 @@ let ``crash handler is not invoked if handler is cleared`` () =
                 Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
-            typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
@@ -526,7 +526,7 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let _parent = Better.spawn tk.Sys parentProps (Better.checkpointed start)
 
         let crasher = probe.ExpectMsg<IActorRef<obj>> ()
-        retype crasher <! Akka.Actor.Kill.Instance
+        (retype crasher).Tell(Akka.Actor.Kill.Instance, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
@@ -537,12 +537,12 @@ let ``state is recovered after a crash`` () =
         let rec crashHandle recved = Better.actor {
             let! msg = Actions.receiveOnly<string>()
             let newRecved = msg :: recved
-            typed probe <! String.concat "," newRecved
+            do! typed probe <! String.concat "," newRecved
             return! crashHandle newRecved
         }
         let crashStart = Better.actor {
             do! Actions.setRestartHandler (fun msg err ->
-                typed probe <! {msg = msg; err = err}
+                (typed probe).Tell ({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
             )
             return! crashHandle []
         }
@@ -557,7 +557,7 @@ let ``state is recovered after a crash`` () =
                 Actions.createChild (fun f ->
                     Better.spawn f (Better.Props.Named "crasher") (Better.checkpointed crashStart)
                 )
-            typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
@@ -568,14 +568,14 @@ let ``state is recovered after a crash`` () =
 
         let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"
-        crasher <! msg1
+        crasher.Tell(msg1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg msg1 |> ignore
         let msg2 = "2"
-        crasher <! msg2
+        crasher.Tell(msg2, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg $"{msg2},{msg1}"|> ignore
-        retype crasher <! Akka.Actor.Kill.Instance
+        (retype crasher).Tell(Akka.Actor.Kill.Instance, Akka.Actor.ActorRefs.NoSender)
         let _res = probe.ExpectMsg<CrashMsg>()
         let msg3 = "3"
-        crasher <! msg3
+        crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
 
