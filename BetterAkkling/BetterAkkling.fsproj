@@ -14,11 +14,10 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Core.fs" />
-        <Compile Include="Props.fs" />
-        <Compile Include="Spawn.fs" />
-        <Compile Include="Actions.fs" />
-        <Compile Include="better.fs" />
+        <Compile Include="Logger.fs" />
+        <Compile Include="Context.fs" />
+        <Compile Include="ActorRefs.fs" />
+        <Compile Include="Simple.fs" />
     </ItemGroup>
 
     <ItemGroup>

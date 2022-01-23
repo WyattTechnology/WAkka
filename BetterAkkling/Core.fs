@@ -1,14 +1,11 @@
 ﻿module BetterAkkling.Core
 
-open System
 open Akkling
 
-type RestartHandler = obj -> exn -> unit
-
 type SimpleActor = class end
-type EventSourcedActor<'Snapshotting> = class end
-type NoSnapshotting = class end
-type WithSnapshotting<'SnapshotType> = class end
+//type EventSourcedActor<'Snapshotting> = class end
+//type NoSnapshotting = class end
+//type WithSnapshotting<'SnapshotType> = class end
 
 type Action<'Type, 'Result> =
     internal

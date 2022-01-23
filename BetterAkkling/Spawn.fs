@@ -8,98 +8,98 @@ open BetterAkkling.Props
 
 open Core
 
-module private Simple =
-
-    type Start = {
-        checkpoint: Option<obj -> Action<SimpleActor, unit>>
-        restartHandler: Option<RestartHandler>
-    }
-
-    type RestartHandlerMsg = RestartHandlerMsg
-
-    let doSpawn spawnFunc (props: Props) (persist: bool) (action: Action<SimpleActor, unit>) =
-
-        let runActor (ctx: Actors.Actor<obj>) =
-
-            let handleLifecycle restartHandler checkpoint evt =
-                match evt with
-                | PreRestart(exn, msg) ->
-                    restartHandler |> Option.iter (fun f -> f msg exn)
-                    if persist then
-                        retype ctx.Self <! {checkpoint = checkpoint; restartHandler = restartHandler}
-                    else
-                        retype ctx.Self <! {checkpoint = None; restartHandler = None}
-                | _ ->
-                    ()
-                ignored ()
-
-            let rec handleNextAction restartHandler checkpoint action =
-                match action with
-                | Stop _
-                | Done _ ->
-                    stop ()
-                | Simple next ->
-                    handleNextAction restartHandler checkpoint (next ctx)
-                | Msg next ->
-                    become (waitForMessage restartHandler next)
-                | Persist _ ->
-                    logError ctx "Got persist action in simple actor"
-                    stop ()
-                | RestartHandlerUpdate (newHandler, next) ->
-                    ActorRefs.retype ctx.Self <! RestartHandlerMsg
-                    become (waitForNewHandler newHandler checkpoint next)
-
-            and waitForNewHandler restartHandler checkpoint next (msg: obj) =
-                match msg with
-                | :? RestartHandlerMsg ->
-                    ctx.UnstashAll ()
-                    handleNextAction restartHandler checkpoint (next ())
-                | :? LifecycleEvent as evt ->
-                    handleLifecycle restartHandler checkpoint evt
-                | :? Start ->
-                    ignored ()
-                | _ ->
-                    ctx.Stash ()
-                    ignored ()
-
-            and waitForMessage restartHandler next (msg: obj) =
-                match msg with
-                | :? LifecycleEvent as evt ->
-                    handleLifecycle restartHandler (Some next) evt
-                | :? Start ->
-                    ignored ()
-                | _ ->
-                    handleNextAction restartHandler (Some next) (next msg)
-
-            let waitForStart (msg: obj) =
-                match msg with
-                | :? LifecycleEvent as evt ->
-                    let handler = fun msg exn ->
-                        Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
-                    handleLifecycle (Some handler) None evt
-                | :? Start as start ->
-                    ctx.UnstashAll ()
-                    match start.checkpoint with
-                    | None ->
-                        handleNextAction None None action
-                    | Some checkpoint ->
-                        become (waitForMessage start.restartHandler checkpoint)
-                | _ ->
-                    ctx.Stash ()
-                    ignored ()
-
-            become waitForStart
-
-        let act = spawnFunc {
-            Props.props runActor with
-                Dispatcher = props.dispatcher
-                Mailbox = props.mailbox
-                Deploy = props.deploy
-                Router = props.router
-                SupervisionStrategy = props.supervisionStrategy
-        }
-        retype act <! {checkpoint = None; restartHandler = None}
-        retype act
+//module private Simple =
+//
+//    type Start = {
+//        checkpoint: Option<obj -> Action<SimpleActor, unit>>
+//        restartHandler: Option<RestartHandler>
+//    }
+//
+//    type RestartHandlerMsg = RestartHandlerMsg
+//
+//    let doSpawn spawnFunc (props: Props) (persist: bool) (action: Action<SimpleActor, unit>) =
+//
+//        let runActor (ctx: Actors.Actor<obj>) =
+//
+//            let handleLifecycle restartHandler checkpoint evt =
+//                match evt with
+//                | PreRestart(exn, msg) ->
+//                    restartHandler |> Option.iter (fun f -> f msg exn)
+//                    if persist then
+//                        retype ctx.Self <! {checkpoint = checkpoint; restartHandler = restartHandler}
+//                    else
+//                        retype ctx.Self <! {checkpoint = None; restartHandler = None}
+//                | _ ->
+//                    ()
+//                ignored ()
+//
+//            let rec handleNextAction restartHandler checkpoint action =
+//                match action with
+//                | Stop _
+//                | Done _ ->
+//                    stop ()
+//                | Simple next ->
+//                    handleNextAction restartHandler checkpoint (next ctx)
+//                | Msg next ->
+//                    become (waitForMessage restartHandler next)
+//                | Persist _ ->
+//                    logError ctx "Got persist action in simple actor"
+//                    stop ()
+//                | RestartHandlerUpdate (newHandler, next) ->
+//                    ActorRefs.retype ctx.Self <! RestartHandlerMsg
+//                    become (waitForNewHandler newHandler checkpoint next)
+//
+//            and waitForNewHandler restartHandler checkpoint next (msg: obj) =
+//                match msg with
+//                | :? RestartHandlerMsg ->
+//                    ctx.UnstashAll ()
+//                    handleNextAction restartHandler checkpoint (next ())
+//                | :? LifecycleEvent as evt ->
+//                    handleLifecycle restartHandler checkpoint evt
+//                | :? Start ->
+//                    ignored ()
+//                | _ ->
+//                    ctx.Stash ()
+//                    ignored ()
+//
+//            and waitForMessage restartHandler next (msg: obj) =
+//                match msg with
+//                | :? LifecycleEvent as evt ->
+//                    handleLifecycle restartHandler (Some next) evt
+//                | :? Start ->
+//                    ignored ()
+//                | _ ->
+//                    handleNextAction restartHandler (Some next) (next msg)
+//
+//            let waitForStart (msg: obj) =
+//                match msg with
+//                | :? LifecycleEvent as evt ->
+//                    let handler = fun msg exn ->
+//                        Logging.logErrorf ctx "Actor crashed before actions started with msg %A: %A" msg exn
+//                    handleLifecycle (Some handler) None evt
+//                | :? Start as start ->
+//                    ctx.UnstashAll ()
+//                    match start.checkpoint with
+//                    | None ->
+//                        handleNextAction None None action
+//                    | Some checkpoint ->
+//                        become (waitForMessage start.restartHandler checkpoint)
+//                | _ ->
+//                    ctx.Stash ()
+//                    ignored ()
+//
+//            become waitForStart
+//
+//        let act = spawnFunc {
+//            Props.props runActor with
+//                Dispatcher = props.dispatcher
+//                Mailbox = props.mailbox
+//                Deploy = props.deploy
+//                Router = props.router
+//                SupervisionStrategy = props.supervisionStrategy
+//        }
+//        retype act <! {checkpoint = None; restartHandler = None}
+//        retype act
 
 module private SimpleNew =
 
