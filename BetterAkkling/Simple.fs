@@ -2,7 +2,6 @@
 
 open System
 open BetterAkkling.Context
-open ActorRefs
 
 type Action<'Result> =
     internal
@@ -158,50 +157,50 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: Actor
         | None ->
             parent.ActorOf(actProps)
     act.Tell({SimpleActor.checkpoint = None; SimpleActor.restartHandler = None}, act)
-    typed act
+    Akkling.ActorRefs.typed act
 
 type private Timeout = {started: DateTime}
 
-let private doSchedule delay (receiver: IActorRef<'msg>) (msg: 'msg) =
+let private doSchedule delay (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
     Simple (fun ctx ->
         Done (
             let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellOnce (delay, receiver.Untyped, msg, ctx.Self, cancel)
+            ctx.Scheduler.ScheduleTellOnce (delay, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
             cancel :> Akka.Actor.ICancelable
         )
     )
-let private doScheduleRepeatedly initialDelay interval (receiver: IActorRef<'msg>) (msg: 'msg) =
+let private doScheduleRepeatedly initialDelay interval (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
     Simple (fun ctx ->
         Done (
             let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellRepeatedly (initialDelay, interval, receiver.Untyped, msg, ctx.Self, cancel)
+            ctx.Scheduler.ScheduleTellRepeatedly (initialDelay, interval, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
             cancel :> Akka.Actor.ICancelable
         )
     )
 
 type CommonActions internal () =
 
-    static member getActor () = Simple (fun ctx -> Done (typed ctx.Self))
+    static member getActor () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Self))
     static member unsafeGetActorCtx () = Simple (fun ctx -> Done (ctx :> IActorContext))
 
     static member getLogger () = Simple (fun ctx -> Done ctx.Logger)
 
     static member stop () = Stop Done
 
-    static member getSender () = Simple (fun ctx -> Done (typed ctx.Sender))
+    static member getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
 
-    static member createChild (make: Akka.Actor.IActorRefFactory -> IActorRef<'Msg>) =
+    static member createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
         Simple (fun ctx -> Done (make ctx.ActorFactory))
 
-    static member send (recv: IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
+    static member send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
 
     static member stash () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
     static member unstashOne () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
     static member unstashAll () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
 
-    static member watch (act: IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Watch act.Untyped))
+    static member watch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Watch (Akkling.ActorRefs.untyped act)))
     static member watch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Watch act))
-    static member unwatch (act: IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Unwatch act.Untyped))
+    static member unwatch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Unwatch (Akkling.ActorRefs.untyped act)))
     static member unwatch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Unwatch act))
 
     static member schedule delay receiver msg = doSchedule delay receiver msg
@@ -252,7 +251,7 @@ type Actions private () =
         actor {
             let now = DateTime.Now
             let! self = Actions.getActor ()
-            let! cancel = doSchedule timeout (retype self) {started = now}
+            let! cancel = doSchedule timeout (Akkling.ActorRefs.retype self) {started = now}
             return! recv now cancel
         }
 
@@ -293,4 +292,4 @@ type Actions private () =
 
 [<AutoOpen>]
 module Ops =
-    let (<!) (recv: IActorRef<'Msg>) msg = Actions.send recv msg
+    let (<!) (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Actions.send recv msg

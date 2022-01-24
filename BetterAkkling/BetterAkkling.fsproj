@@ -16,7 +16,6 @@
     <ItemGroup>
         <Compile Include="Logger.fs" />
         <Compile Include="Context.fs" />
-        <Compile Include="ActorRefs.fs" />
         <Compile Include="Simple.fs" />
     </ItemGroup>
 
