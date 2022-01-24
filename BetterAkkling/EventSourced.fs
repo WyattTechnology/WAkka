@@ -1,23 +1,14 @@
 ﻿module BetterAkkling.EventSourced
 
-open System
+open Context
+open CommonActions
 
-open BetterAkkling.Context
-open BetterAkkling.Simple
+type PersistentAction () = class end
 
-type Action<'Result> =
-    internal
-    | Done of 'Result
-    | Simple of (IActionContext -> Action<'Result>)
-    | Persist of Simple.Action<obj> * (obj -> Action<'Result>)
-    | Stop of (unit -> Action<'Result>)
+type Action<'Result> = ActionBase<'Result, Simple.Action<obj>>
 
 let rec private bind (f: 'a -> Action<'b>) (op: Action<'a>) : Action<'b> =
-    match op with
-    | Done res -> f res
-    | Simple cont -> Simple (cont >> bind f)
-    | Persist (action, cont) -> Persist (action, cont >> bind f)
-    | Stop cont -> Stop (cont >> bind f)
+    bindBase f op
 
 type ActorBuilder () =
     member this.Bind (x, f) = bind f x
@@ -34,7 +25,7 @@ module private EventSourcedActor =
     type Stopped = Stopped
     type ReplaySuccess = ReplaySuccess
 
-    type Actor<'Snapshot> (startAction: Action<unit>, snapshotAction: Option<'Snapshot -> Action<unit>>) as this =
+    type Actor<'Snapshot> (startAction: Action<unit>, _snapshotAction: Option<'Snapshot -> Action<unit>>) as this =
 
         inherit Akka.Persistence.UntypedPersistentActor ()
 
@@ -52,11 +43,11 @@ module private EventSourcedActor =
                 ctx.Stop ctx.Self
             | Simple next ->
                 handleActions recovering (next this)
-            | Persist (action, next) ->
+            | Extra (subAction, next) ->
                 if recovering then
-                    msgHandler <- handleRecoveryAction next action
+                    msgHandler <- handleRecoveryAction next subAction
                 else
-                    handlePersistAction next action
+                    handlePersistAction next subAction
 
         and handlePersistAction cont subAction =
             match subAction with
@@ -127,7 +118,7 @@ type ActorType<'Snapshot> =
 let eventSourced action = ActorType<unit>.EventSourced action
 
 let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: ActorType<'Snapshot>) =
-    let action, snapshotHandler =
+    let action, _snapshotHandler =
         match actorType with
         | EventSourced action -> action, None
     let actProps = Akka.Actor.Props.Create(fun () -> EventSourcedActor.Actor<'Snapshot>(action, None))
@@ -144,80 +135,20 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: Actor
             parent.ActorOf(actProps)
     Akkling.ActorRefs.typed act
 
-type private Timeout = {started: DateTime}
+module Actions =
 
-let private doSchedule delay (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
-    Simple (fun ctx ->
-        Done (
-            let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellOnce (delay, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
-            cancel :> Akka.Actor.ICancelable
-        )
-    )
-let private doScheduleRepeatedly initialDelay interval (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
-    Simple (fun ctx ->
-        Done (
-            let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellRepeatedly (initialDelay, interval, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
-            cancel :> Akka.Actor.ICancelable
-        )
-    )
+    let private persistObj (action: Simple.Action<obj>): Action<obj> =
+        Extra (action, Done)
 
-type CommonActions internal () =
+    let persist (action: Simple.Action<'Msg>): Action<'Result> = actor {
+        let! evt = persistObj (Simple.actor {
+            let! res = action
+            return (res :> obj)
+        })
+        return (evt :?> 'Result)
+    }
 
-    static member getActor () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Self))
-    static member unsafeGetActorCtx () = Simple (fun ctx -> Done (ctx :> IActorContext))
-
-    static member getLogger () = Simple (fun ctx -> Done ctx.Logger)
-
-    static member stop () = Stop Done
-
-    static member getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
-
-    static member createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
-        Simple (fun ctx -> Done (make ctx.ActorFactory))
-
-    static member send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
-
-    static member stash () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
-    static member unstashOne () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-    static member unstashAll () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
-
-    static member watch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Watch (Akkling.ActorRefs.untyped act)))
-    static member watch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Watch act))
-    static member unwatch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Unwatch (Akkling.ActorRefs.untyped act)))
-    static member unwatch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Unwatch act))
-
-    static member schedule delay receiver msg = doSchedule delay receiver msg
-    static member scheduleRepeatedly delay interval receiver msg = doScheduleRepeatedly delay interval receiver msg
-
-    static member select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
-    static member select (path: Akka.Actor.ActorPath) = Simple (fun ctx -> Done (ctx.ActorSelection path))
-
-    static member setRestartHandler handler = Simple (fun ctx -> Done (ctx.SetRestartHandler handler))
-    static member clearRestartHandler () = Simple (fun ctx -> Done (ctx.ClearRestartHandler ()))
-
-type Actions private () =
-
-    inherit CommonActions()
-
-
-
-//    static member private persistObj (action: Action<SimpleActor, obj>): Action<EventSourcedActor<'Snapshotting>, obj> =
-//        Persist (action, Done)
-//
-//    static member persist (action: Action<SimpleActor, 'Result>): Action<EventSourcedActor<'Snapshotting>, 'Result> = actor {
-//        let! evt = Actions.persistObj (actor {
-//            let! res = action
-//            return (res :> obj)
-//        })
-//        return (evt :?> 'Result)
-//    }
-//
 //    static member snapshot (snapshot: 'Snapshot): Action<EventSourcedActor<WithSnapshotting<'Snapshot>>, 'Result> = actor {
 //        return Unchecked.defaultof<_>
 //    }
 
-[<AutoOpen>]
-module Ops =
-    let (<!) (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Actions.send recv msg
