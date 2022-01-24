@@ -1,21 +1,16 @@
 ﻿module BetterAkkling.Simple
 
 open System
-open BetterAkkling.Context
 
-type Action<'Result> =
-    internal
-    | Done of 'Result
-    | Simple of (IActionContext -> Action<'Result>)
-    | Msg of (obj -> Action<'Result>)
-    | Stop of (unit -> Action<'Result>)
+open Context
+open CommonActions
+
+type SimpleAction () = class end
+
+type Action<'Result> = ActionBase<'Result, SimpleAction>
 
 let rec private bind (f: 'a -> Action<'b>) (op: Action<'a>) : Action<'b> =
-    match op with
-    | Done res -> f res
-    | Simple cont -> Simple (cont >> bind f)
-    | Msg cont -> Msg (cont >> bind f)
-    | Stop cont -> Stop (cont >> bind f)
+    bindBase f op
 
 type ActorBuilder () =
     member this.Bind (x, f) = bind f x
@@ -26,34 +21,6 @@ type ActorBuilder () =
     member this.Delay f = f ()
 
 let actor = ActorBuilder ()
-
-type Props = {
-    name: Option<string>
-    dispatcher: Option<string>
-    mailbox: Option<string>
-    deploy: Option<Akka.Actor.Deploy>
-    router: Option<Akka.Routing.RouterConfig>
-    supervisionStrategy: Option<Akka.Actor.SupervisorStrategy>
-}
-with
-    static member Anonymous = {
-        name =  None
-        dispatcher = None
-        mailbox = None
-        deploy = None
-        router = None
-        supervisionStrategy = None
-    }
-
-    static member Named name = {
-        name =  Some name
-        dispatcher = None
-        mailbox = None
-        deploy = None
-        router = None
-        supervisionStrategy = None
-    }
-
 
 module private SimpleActor =
 
@@ -82,7 +49,7 @@ module private SimpleActor =
                 ctx.Stop ctx.Self
             | Simple next ->
                 handleActions (next this)
-            | Msg next ->
+            | Extra (_, next) ->
                 checkpoint <- Some next
                 msgHandler <- waitForMsg next
 
@@ -161,62 +128,11 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: Actor
 
 type private Timeout = {started: DateTime}
 
-let private doSchedule delay (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
-    Simple (fun ctx ->
-        Done (
-            let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellOnce (delay, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
-            cancel :> Akka.Actor.ICancelable
-        )
-    )
-let private doScheduleRepeatedly initialDelay interval (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
-    Simple (fun ctx ->
-        Done (
-            let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
-            ctx.Scheduler.ScheduleTellRepeatedly (initialDelay, interval, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
-            cancel :> Akka.Actor.ICancelable
-        )
-    )
-
-type CommonActions internal () =
-
-    static member getActor () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Self))
-    static member unsafeGetActorCtx () = Simple (fun ctx -> Done (ctx :> IActorContext))
-
-    static member getLogger () = Simple (fun ctx -> Done ctx.Logger)
-
-    static member stop () = Stop Done
-
-    static member getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
-
-    static member createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
-        Simple (fun ctx -> Done (make ctx.ActorFactory))
-
-    static member send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
-
-    static member stash () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
-    static member unstashOne () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-    static member unstashAll () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
-
-    static member watch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Watch (Akkling.ActorRefs.untyped act)))
-    static member watch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Watch act))
-    static member unwatch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Unwatch (Akkling.ActorRefs.untyped act)))
-    static member unwatch (act: Akka.Actor.IActorRef) = Simple (fun ctx -> Done (ctx.Unwatch act))
-
-    static member schedule delay receiver msg = doSchedule delay receiver msg
-    static member scheduleRepeatedly delay interval receiver msg = doScheduleRepeatedly delay interval receiver msg
-
-    static member select (path: string) = Simple (fun ctx -> Done (ctx.ActorSelection path))
-    static member select (path: Akka.Actor.ActorPath) = Simple (fun ctx -> Done (ctx.ActorSelection path))
-
-    static member setRestartHandler handler = Simple (fun ctx -> Done (ctx.SetRestartHandler handler))
-    static member clearRestartHandler () = Simple (fun ctx -> Done (ctx.ClearRestartHandler ()))
-
 type Actions private () =
 
-    inherit CommonActions()
+    inherit CommonActions<SimpleAction>()
 
-    static let doReceive () : Action<obj> = Msg Done
+    static let doReceive () : Action<obj> = Extra (SimpleAction (), Done)
 
     static member receive (choose: obj -> Option<'Msg>) =
         let rec recv () = actor {

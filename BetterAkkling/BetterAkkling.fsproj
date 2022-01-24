@@ -16,7 +16,9 @@
     <ItemGroup>
         <Compile Include="Logger.fs" />
         <Compile Include="Context.fs" />
+        <Compile Include="CommonActions.fs" />
         <Compile Include="Simple.fs" />
+        <Compile Include="EventSourced.fs" />
     </ItemGroup>
 
     <ItemGroup>
