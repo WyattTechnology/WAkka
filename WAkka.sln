@@ -7,6 +7,8 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Files", "Files", "{3226A2F9-8F4F-4718-8BA0-8BA120F82C1E}"
 	ProjectSection(SolutionItems) = preProject
 		readme.md = readme.md
+		global.json = global.json
+		WAkka-ci.yml = WAkka-ci.yml
 	EndProjectSection
 EndProject
 Global

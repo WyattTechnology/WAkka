@@ -1,0 +1,10 @@
+build_and_test:
+  stage:
+    build
+  tags:
+    - WAkka
+  script:
+    - dotnet test -c Release
+  interruptible:
+    true
+
