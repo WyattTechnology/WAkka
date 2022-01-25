@@ -40,8 +40,6 @@ let getLogger () = Simple (fun ctx -> Done ctx.Logger)
 
 let stop () = Stop Done
 
-let getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
-
 let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
     Simple (fun ctx -> Done (make ctx.ActorFactory))
 

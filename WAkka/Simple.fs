@@ -181,6 +181,8 @@ module Actions =
             timeout
         )
 
+    let getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
+
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
     let unstashOne () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
     let unstashAll () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
