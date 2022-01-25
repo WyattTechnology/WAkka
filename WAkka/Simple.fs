@@ -1,4 +1,4 @@
-﻿module BetterAkkling.Simple
+﻿module WAkka.Simple
 
 open System
 

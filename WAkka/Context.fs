@@ -1,4 +1,4 @@
-﻿module BetterAkkling.Context
+﻿module WAkka.Context
 
 type IActorContext =
     abstract member Self: Akka.Actor.IActorRef

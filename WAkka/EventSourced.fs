@@ -1,4 +1,4 @@
-﻿module BetterAkkling.EventSourced
+﻿module WAkka.EventSourced
 
 open Context
 open CommonActions

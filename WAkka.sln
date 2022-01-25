@@ -1,8 +1,8 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BetterAkkling", "BetterAkkling\BetterAkkling.fsproj", "{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkka", "WAkka\WAkka.fsproj", "{C6499C18-C7A7-40F8-96AD-5EABAD4D22CE}"
 EndProject
-Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "BetterAkklingTests", "BetterAkklingTests\BetterAkklingTests.fsproj", "{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}"
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkkaTests", "WAkkaTests\WAkkaTests.fsproj", "{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

@@ -1,4 +1,4 @@
-﻿module BetterAkklingTests.NotPersistedTests
+﻿module WAkkaTests.NotPersistedTests
 
 open System
 
@@ -7,10 +7,10 @@ open FsUnitTyped
 
 open Akkling
 
-open BetterAkkling
-open BetterAkkling.CommonActions
-open BetterAkkling.Simple
-open BetterAkkling.Simple.Actions
+open WAkka
+open WAkka.CommonActions
+open WAkka.Simple
+open WAkka.Simple.Actions
 
 type Msg = {value: int}
 

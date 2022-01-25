@@ -1,4 +1,4 @@
-﻿module BetterAkkling.CommonActions
+﻿module WAkka.CommonActions
 
 open Context
 

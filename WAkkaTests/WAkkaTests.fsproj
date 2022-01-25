@@ -14,7 +14,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\BetterAkkling\BetterAkkling.fsproj" />
+      <ProjectReference Include="..\WAkka\WAkka.fsproj" />
     </ItemGroup>
 
     <ItemGroup>

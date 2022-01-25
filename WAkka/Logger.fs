@@ -1,4 +1,4 @@
-﻿module BetterAkkling.Logger
+﻿module WAkka.Logger
 
 type Logger internal (logger: Akka.Event.ILoggingAdapter) =
     member _.Log level msg = logger.Log (level, msg)
