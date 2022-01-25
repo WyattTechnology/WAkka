@@ -47,10 +47,6 @@ let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRe
 
 let send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
 
-let stash () : ActionBase<unit, 'Extra> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
-let unstashOne () : ActionBase<unit, 'Extra> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-let unstashAll () : ActionBase<unit, 'Extra> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
-
 let watch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Watch (Akkling.ActorRefs.untyped act)))
 let unwatch (act: Akkling.ActorRefs.IActorRef<'msg>) = Simple (fun ctx -> Done (ctx.Unwatch (Akkling.ActorRefs.untyped act)))
 

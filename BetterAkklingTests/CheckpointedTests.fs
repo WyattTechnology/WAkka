@@ -5,6 +5,8 @@ open System
 open NUnit.Framework
 open FsUnitTyped
 
+open Akkling
+
 open BetterAkkling
 open BetterAkkling.CommonActions
 open BetterAkkling.Simple
@@ -12,18 +14,18 @@ open BetterAkkling.Simple.Actions
 
 type Msg = {value: int}
 
-let tell (act: Akkling.ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
     act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
 
 [<Test>]
 let ``spawn with name`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
                 let! msg = receiveOnly<Msg> ()
-                do! Akkling.ActorRefs.typed probe <! msg
+                do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
@@ -32,7 +34,7 @@ let ``spawn with name`` () =
         tell act m1
         probe.ExpectMsg m1 |> ignore
 
-        tell (Akkling.ActorRefs.retype act) "testing 1 2 3"
+        tell (retype act) "testing 1 2 3"
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 12345}
@@ -41,13 +43,13 @@ let ``spawn with name`` () =
 
 [<Test>]
 let ``spawn with no name`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
                 let! msg = receiveOnly<Msg> ()
-                do! Akkling.ActorRefs.typed probe <! msg
+                do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
         let act = spawn tk.Sys Context.Props.Anonymous (Checkpointed <| handle ())
@@ -56,7 +58,7 @@ let ``spawn with no name`` () =
         tell act m1
         probe.ExpectMsg m1 |> ignore
 
-        tell (Akkling.ActorRefs.retype act) "testing 1 2 3"
+        tell (retype act) "testing 1 2 3"
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
         let m2 = {value = 12345}
@@ -65,36 +67,36 @@ let ``spawn with no name`` () =
 
 [<Test>]
 let ``get actor gives correct actor ref`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
                 let! act = getActor ()
-                do! Akkling.ActorRefs.typed probe <! (Akkling.ActorRefs.untyped act)
+                do! ActorRefs.typed probe <! (untyped act)
             }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
 
-        probe.ExpectMsg (Akkling.ActorRefs.untyped act) |> ignore
+        probe.ExpectMsg (untyped act) |> ignore
 
 [<Test>]
 let ``get actor context gives correct actor`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
                 let! act = unsafeGetActorCtx ()
-                do! Akkling.ActorRefs.typed probe <! act.Self
+                do! ActorRefs.typed probe <! act.Self
             }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
 
-        probe.ExpectMsg (Akkling.ActorRefs.untyped act) |> ignore
+        probe.ExpectMsg (untyped act) |> ignore
 
 
 [<Test>]
 let ``stop action stops the actor`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
@@ -102,19 +104,19 @@ let ``stop action stops the actor`` () =
                 let! _msg = receiveOnly<Msg> ()
                 do! stop ()
                 // The actor should stop on the previous line so this message should never be sent
-                do! Akkling.ActorRefs.typed probe <! "should not get this"
+                do! ActorRefs.typed probe <! "should not get this"
             }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
 
-        tk.Watch (Akkling.ActorRefs.untyped act) |> ignore
+        tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
         tell act m1
-        tk.ExpectTerminated (Akkling.ActorRefs.untyped act) |> ignore
+        tk.ExpectTerminated (untyped act) |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
 let ``create actor can create an actor`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
@@ -122,32 +124,32 @@ let ``create actor can create an actor`` () =
                 let! self = getActor ()
                 let! newAct = createChild (fun parent ->
                     let ctx = parent :?> Akka.Actor.IActorContext
-                    (Akkling.ActorRefs.typed probe).Tell (ctx.Self, ctx.Self)
-                    let typed : Akkling.ActorRefs.IActorRef<Msg> = Akkling.ActorRefs.retype self
+                    (typed probe).Tell (ctx.Self, ctx.Self)
+                    let typed : ActorRefs.IActorRef<Msg> = ActorRefs.retype self
                     typed
                 )
-                do! Akkling.ActorRefs.typed probe <! (Akkling.ActorRefs.untyped newAct)
+                do! ActorRefs.typed probe <! (untyped newAct)
             }
-        let act : Akkling.ActorRefs.IActorRef<Msg> =
+        let act : ActorRefs.IActorRef<Msg> =
             spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
 
-        probe.ExpectMsg (Akkling.ActorRefs.untyped act) |> ignore
-        probe.ExpectMsg (Akkling.ActorRefs.untyped act) |> ignore
+        probe.ExpectMsg (untyped act) |> ignore
+        probe.ExpectMsg (untyped act) |> ignore
 
 [<Test>]
 let ``unstash one only unstashes one message at a time`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle unstashed =
             actor {
                 let! msg = receiveOnly<Msg> ()
                 if msg.value > 100 then
-                    do! Akkling.ActorRefs.typed probe <! msg
+                    do! ActorRefs.typed probe <! msg
                     do! unstashOne ()
                     return! handle true
                 elif unstashed then
-                    do! Akkling.ActorRefs.typed probe <! msg
+                    do! ActorRefs.typed probe <! msg
                     return! handle true
                 else
                     do! stash ()
@@ -177,18 +179,18 @@ let ``unstash one only unstashes one message at a time`` () =
 
 [<Test>]
 let ``unstash all unstashes all the messages`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle unstashed =
             actor {
                 let! msg = receiveOnly<Msg> ()
                 if msg.value > 100 then
-                    do! Akkling.ActorRefs.typed probe <! msg
+                    do! ActorRefs.typed probe <! msg
                     do! unstashAll ()
                     return! handle true
                 elif unstashed then
-                    do! Akkling.ActorRefs.typed probe <! msg
+                    do! ActorRefs.typed probe <! msg
                     return! handle true
                 else
                     do! stash ()
@@ -213,7 +215,7 @@ let ``unstash all unstashes all the messages`` () =
 
 [<Test>]
 let ``watch works`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = actor {
@@ -225,26 +227,26 @@ let ``watch works`` () =
         let rec handle () =
             actor {
                 match! receiveAny () with
-                | Akkling.MessagePatterns.Terminated (act, _, _) ->
-                    do! Akkling.ActorRefs.typed probe <!  (Akkling.ActorRefs.untyped act)
+                | MessagePatterns.Terminated (act, _, _) ->
+                    do! ActorRefs.typed probe <!  (untyped act)
                     return! stop ()
                 | _msg ->
                     return! handle ()
             }
         let start = actor {
             do! watch watched
-            do! Akkling.ActorRefs.typed probe <! ""
+            do! ActorRefs.typed probe <! ""
             return! handle ()
         }
         let _act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
 
         probe.ExpectMsg "" |> ignore
-        tell (Akkling.ActorRefs.retype watched) ""
-        probe.ExpectMsg (Akkling.ActorRefs.untyped watched) |> ignore
+        tell (retype watched) ""
+        probe.ExpectMsg (untyped watched) |> ignore
 
 [<Test>]
 let ``unwatch works`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = actor {
@@ -256,32 +258,32 @@ let ``unwatch works`` () =
         let rec handle () =
             actor {
                 match! receiveAny () with
-                | Akkling.MessagePatterns.Terminated (act, _, _) ->
-                    do! Akkling.ActorRefs.typed probe <!  act
+                | MessagePatterns.Terminated (act, _, _) ->
+                    do! ActorRefs.typed probe <!  act
                     return! stop ()
                 | :? string ->
                     do! unwatch watched
-                    do! Akkling.ActorRefs.typed probe <! "unwatched"
+                    do! ActorRefs.typed probe <! "unwatched"
                     return! handle ()
                 | _msg ->
                     return! handle ()
             }
         let start = actor {
             do! watch watched
-            do! Akkling.ActorRefs.typed probe <! "watched"
+            do! ActorRefs.typed probe <! "watched"
             return! handle ()
         }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
 
         probe.ExpectMsg "watched" |> ignore
-        tell (Akkling.ActorRefs.retype act) ""
+        tell (retype act) ""
         probe.ExpectMsg "unwatched" |> ignore
-        tell (Akkling.ActorRefs.retype watched) ""
+        tell (retype watched) ""
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
 let ``schedule works`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
@@ -290,8 +292,8 @@ let ``schedule works`` () =
                 return! handle ()
             }
         let start = actor {
-            let! _cancel = schedule (TimeSpan.FromMilliseconds 100.0) (Akkling.ActorRefs.typed probe) "message"
-            do! Akkling.ActorRefs.typed probe <! "scheduled"
+            let! _cancel = schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
+            do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
         let _act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
@@ -308,7 +310,7 @@ let ``schedule works`` () =
 
 [<Test>]
 let ``scheduled messages can be cancelled`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
@@ -317,9 +319,9 @@ let ``scheduled messages can be cancelled`` () =
                 return! handle ()
             }
         let start = actor {
-            let! cancel = schedule (TimeSpan.FromMilliseconds 100.0) (Akkling.ActorRefs.typed probe) "message"
+            let! cancel = schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
             cancel.Cancel ()
-            do! Akkling.ActorRefs.typed probe <! "scheduled"
+            do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
         let _act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
@@ -332,7 +334,7 @@ let ``scheduled messages can be cancelled`` () =
 
 [<Test>]
 let ``schedule repeatedly works`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let delay = TimeSpan.FromMilliseconds 100.0
@@ -344,8 +346,8 @@ let ``schedule repeatedly works`` () =
                 return! handle ()
             }
         let start = actor {
-            let! _cancel = scheduleRepeatedly delay interval (Akkling.ActorRefs.typed probe) "message"
-            do! Akkling.ActorRefs.typed probe <! "scheduled"
+            let! _cancel = scheduleRepeatedly delay interval (typed probe) "message"
+            do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
         let _act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
@@ -371,14 +373,14 @@ let ``schedule repeatedly works`` () =
 
 [<Test>]
 let ``get sender get's the correct actor`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
                 let! _msg = receiveOnly<string> ()
                 let! sender = getSender ()
-                do! Akkling.ActorRefs.typed probe <! (Akkling.ActorRefs.untyped sender)
+                do! ActorRefs.typed probe <! (untyped sender)
                 return! handle ()
             }
         let act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed <| handle ())
@@ -388,7 +390,7 @@ let ``get sender get's the correct actor`` () =
 
 [<Test>]
 let ``select get's the correct selection`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let probeAct = probe :> Akka.Actor.IActorRef
@@ -401,7 +403,7 @@ let ``select get's the correct selection`` () =
             }
         let start = actor {
             let! selection = select path
-            do! Akkling.ActorRefs.typed probe <! selection
+            do! ActorRefs.typed probe <! selection
         }
         let _act = spawn tk.Sys (Context.Props.Named "test") (Checkpointed start)
 
@@ -415,7 +417,7 @@ type CrashMsg = {
 
 [<Test>]
 let ``crash handler is invoked if actor crashes`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () = actor {
@@ -430,7 +432,7 @@ let ``crash handler is invoked if actor crashes`` () =
         }
         let crashStart = actor {
             do! setRestartHandler (fun _ctx msg err ->
-                tell (Akkling.ActorRefs.typed probe) {msg = msg; err = err}
+                tell (typed probe) {msg = msg; err = err}
             )
             return! crashHandle ()
         }
@@ -439,66 +441,24 @@ let ``crash handler is invoked if actor crashes`` () =
                 createChild (fun f ->
                     spawn f (Context.Props.Named "crasher") (Checkpointed crashStart)
                 )
-            do! Akkling.ActorRefs.typed probe <! crasher
+            do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Context.Props.Named "parent" with
-                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (Checkpointed start)
 
-        let crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
-        tell (Akkling.ActorRefs.retype crasher) "crash it"
+        let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
+        tell (retype crasher) "crash it"
         let res = probe.ExpectMsg<CrashMsg>()
         res.msg :?> string |> ignore
         res.err :?> Exception |> ignore
 
 [<Test>]
-let ``crash handler is invoked if actor crashes before calling receive`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
-        let probe = tk.CreateTestProbe "probe"
-
-        let mutable alreadyCrashed = 0
-
-        let rec checkCrash () =
-            if alreadyCrashed = 0 then
-                Threading.Interlocked.Increment(&alreadyCrashed) |> ignore
-                failwith "Initial crash"
-
-        let rec handle () = actor {
-            let! _  = receiveAny ()
-            return! handle ()
-        }
-
-        let crashStart = actor {
-            do! setRestartHandler (fun _ctx msg err ->
-                tell (Akkling.ActorRefs.typed probe) {msg = msg; err = err}
-            )
-            checkCrash ()
-            return! handle()
-        }
-        let start = actor {
-            let! crasher =
-                createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (Checkpointed crashStart)
-                )
-            do! Akkling.ActorRefs.typed probe <! crasher
-            return! handle ()
-        }
-        let parentProps = {
-            Context.Props.Named "parent" with
-                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
-        }
-        let _parent = spawn tk.Sys parentProps (Checkpointed start)
-
-        let _crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
-        let _res = probe.ExpectMsg<CrashMsg>()
-        ignore _res
-
-[<Test>]
 let ``crash handler is not invoked if handler is cleared`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () = actor {
@@ -508,7 +468,7 @@ let ``crash handler is not invoked if handler is cleared`` () =
 
         let crashStart = actor {
             do! setRestartHandler (fun _ctx msg err ->
-                tell (Akkling.ActorRefs.typed probe) {msg = msg; err = err}
+                tell (typed probe) {msg = msg; err = err}
             )
             do! clearRestartHandler ()
             return! handle()
@@ -519,31 +479,31 @@ let ``crash handler is not invoked if handler is cleared`` () =
                 createChild (fun f ->
                     spawn f (Context.Props.Named "crasher") (Checkpointed crashStart)
                 )
-            do! Akkling.ActorRefs.typed probe <! crasher
+            do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Context.Props.Named "parent" with
-                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (Checkpointed start)
 
-        let crasher = probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ()
-        tell (Akkling.ActorRefs.retype crasher) Akka.Actor.Kill.Instance
+        let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
+        tell (retype crasher) Akka.Actor.Kill.Instance
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 type CrashIt = CrashIt
 
 [<Test>]
 let ``state is recovered after a crash`` () =
-    Akkling.TestKit.testDefault <| fun tk ->
+    TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec crashHandle recved = actor {
             match! receiveAny () with
             | :? string as msg ->
                 let newRecved = msg :: recved
-                do! Akkling.ActorRefs.typed probe <! String.concat "," newRecved
+                do! ActorRefs.typed probe <! String.concat "," newRecved
                 return! crashHandle newRecved
             | :? CrashIt ->
                 failwith "crashing"
@@ -552,7 +512,7 @@ let ``state is recovered after a crash`` () =
         }
         let crashStart = actor {
             do! setRestartHandler (fun _ctx msg err ->
-                tell (Akkling.ActorRefs.typed probe) {msg = msg; err = err}
+                tell (typed probe) {msg = msg; err = err}
             )
             return! crashHandle []
         }
@@ -567,23 +527,23 @@ let ``state is recovered after a crash`` () =
                 createChild (fun f ->
                     spawn f (Context.Props.Named "crasher") (Checkpointed crashStart)
                 )
-            do! Akkling.ActorRefs.typed probe <! crasher
+            do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Context.Props.Named "parent" with
-                supervisionStrategy = Akkling.Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (Checkpointed start)
 
-        let crasher : Akkling.ActorRefs.IActorRef<string> = Akkling.ActorRefs.retype (probe.ExpectMsg<Akkling.ActorRefs.IActorRef<obj>> ())
+        let crasher : ActorRefs.IActorRef<string> = ActorRefs.retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
         let msg1 = "1"
         tell crasher msg1
         probe.ExpectMsg msg1 |> ignore
         let msg2 = "2"
         tell crasher msg2
         probe.ExpectMsg $"{msg2},{msg1}"|> ignore
-        tell (Akkling.ActorRefs.retype crasher) CrashIt
+        tell (retype crasher) CrashIt
         let _res = probe.ExpectMsg<CrashMsg>()
         let msg3 = "3"
         tell crasher msg3

@@ -23,7 +23,6 @@ let actor = ActorBuilder ()
 module private EventSourcedActor =
 
     type Stopped = Stopped
-    type ReplaySuccess = ReplaySuccess
 
     type Actor<'Snapshot> (startAction: Action<unit>, _snapshotAction: Option<'Snapshot -> Action<unit>>) as this =
 
@@ -31,7 +30,6 @@ module private EventSourcedActor =
 
         let ctx = Akka.Persistence.Eventsourced.Context
         let logger = Akka.Event.Logging.GetLogger ctx
-        let stash = this.Stash
         let mutable restartHandler = Option<RestartHandler>.None
 
         let mutable msgHandler = fun (_recovering: bool) _ -> ()
@@ -62,7 +60,7 @@ module private EventSourcedActor =
 
         and handleRecoveryAction next action stillRecovering msg =
             if stillRecovering then
-                handleActions stillRecovering (next msg)
+                handleActions true (next msg)
             else
                 handlePersistAction next action
 
@@ -70,24 +68,27 @@ module private EventSourcedActor =
 
         override this.PersistenceId = ctx.Self.Path.ToString()
 
-        override _.OnCommand (msg: obj) = msgHandler false msg
+        override _.OnCommand (msg: obj) =
+            msgHandler false msg
 
         override _.OnPersistRejected(cause, event, sequenceNr) =
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
             ctx.Stop ctx.Self
 
         override _.OnRecover (msg: obj) =
-//            match msg with
+            match msg with
+            | :? Akka.Persistence.RecoveryCompleted ->
+                msgHandler false msg
 //            | :? Akka.Persistence.SnapshotOffer as offer when snapshotAction.IsSome ->
 //                msgHandler <- handleRecoveryAction
-            msgHandler true msg
+            | :? Stopped ->
+                ctx.Stop ctx.Self
+            | _ ->
+                msgHandler true msg
 
         override _.OnRecoveryFailure(reason, message) =
             logger.Error $"recovery failed on message {message}: {reason}"
             ctx.Stop ctx.Self
-
-        override this.OnReplaySuccess() =
-            msgHandler false ReplaySuccess
 
         override this.PreRestart(reason, message) =
             logger.Error $"Actor crashed on {message}: {reason}"
@@ -107,9 +108,10 @@ module private EventSourcedActor =
             member _.Unwatch act = ctx.Unwatch act |> ignore
             member _.ActorSelection (path: string) = ctx.ActorSelection path
             member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
-            member _.Stash = stash
+            member _.Stash = this.Stash
             member _.SetRestartHandler handler = restartHandler <- Some handler
             member _.ClearRestartHandler () = restartHandler <- None
+
 
 type ActorType<'Snapshot> =
     | EventSourced of Action<unit>

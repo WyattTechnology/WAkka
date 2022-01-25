@@ -188,3 +188,8 @@ module Actions =
             ),
             timeout
         )
+
+    let stash () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
+    let unstashOne () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
+    let unstashAll () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
+
