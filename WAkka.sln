@@ -4,6 +4,11 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkka", "WAkka\WAkka.fsproj
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkkaTests", "WAkkaTests\WAkkaTests.fsproj", "{E08FC9FC-1F4A-405A-9BBC-3269F4E317D0}"
 EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Files", "Files", "{3226A2F9-8F4F-4718-8BA0-8BA120F82C1E}"
+	ProjectSection(SolutionItems) = preProject
+		readme.md = readme.md
+	EndProjectSection
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU

@@ -5,11 +5,11 @@ open System
 open Context
 open CommonActions
 
-type SimpleAction () = class end
+type SimpleType () = class end
 
-type Action<'Result> = ActionBase<'Result, SimpleAction>
+type SimpleAction<'Result> = ActionBase<'Result, SimpleType>
 
-let rec private bind (f: 'a -> Action<'b>) (op: Action<'a>) : Action<'b> =
+let rec private bind (f: 'a -> SimpleAction<'b>) (op: SimpleAction<'a>) : SimpleAction<'b> =
     bindBase f op
 
 type ActorBuilder () =
@@ -25,11 +25,11 @@ let actor = ActorBuilder ()
 module private SimpleActor =
 
     type Start = {
-        checkpoint: Option<obj -> Action<unit>>
+        checkpoint: Option<obj -> SimpleAction<unit>>
         restartHandler: Option<RestartHandler>
     }
 
-    type Actor (persist: bool, startAction: Action<unit>) as this =
+    type Actor (persist: bool, startAction: SimpleAction<unit>) as this =
 
         inherit Akka.Actor.UntypedActor ()
 
@@ -102,15 +102,7 @@ module private SimpleActor =
                 with get () = stash
                 and set newStash = stash <- newStash
 
-type ActorType =
-    | NotPersisted of Action<unit>
-    | Checkpointed of Action<unit>
-
-let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: ActorType) =
-    let persist, action =
-        match actorType with
-        | NotPersisted action -> false, action
-        | Checkpointed action -> true, action
+let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist: bool) (action: SimpleAction<unit>) =
     let actProps = Akka.Actor.Props.Create(fun () -> SimpleActor.Actor(persist, action))
     props.dispatcher |> Option.iter(fun d -> actProps.WithDispatcher d |> ignore)
     props.deploy |> Option.iter(fun d -> actProps.WithDeploy d |> ignore)
@@ -131,7 +123,7 @@ module Actions =
 
     type private Timeout = {started: DateTime}
 
-    let private doReceive () : Action<obj> = Extra (SimpleAction (), Done)
+    let private doReceive () : SimpleAction<obj> = Extra (SimpleType (), Done)
 
     let receive (choose: obj -> Option<'Msg>) =
         let rec recv () = actor {
@@ -173,13 +165,13 @@ module Actions =
     let receiveAny () = receive Some
     let receiveAnyWithTimeout (timeout: TimeSpan) = receiveWithTimeout(Some, timeout)
 
-    let receiveOnly<'Msg> () : Action<'Msg> =
+    let receiveOnly<'Msg> () : SimpleAction<'Msg> =
         receive (fun msg ->
             match msg with
             | :? 'Msg as m -> Some m
             | _ -> None
         )
-    let receiveOnlyWithTimeout<'Msg> (timeout: TimeSpan) : Action<Option<'Msg>> =
+    let receiveOnlyWithTimeout<'Msg> (timeout: TimeSpan) : SimpleAction<Option<'Msg>> =
         receiveWithTimeout (
             (fun msg ->
                 match msg with
@@ -189,7 +181,7 @@ module Actions =
             timeout
         )
 
-    let stash () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
-    let unstashOne () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-    let unstashAll () : Action<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
+    let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
+    let unstashOne () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
+    let unstashAll () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
 

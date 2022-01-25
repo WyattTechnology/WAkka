@@ -19,6 +19,7 @@
         <Compile Include="CommonActions.fs" />
         <Compile Include="Simple.fs" />
         <Compile Include="EventSourced.fs" />
+        <Compile Include="Spawn.fs" />
     </ItemGroup>
 
     <ItemGroup>

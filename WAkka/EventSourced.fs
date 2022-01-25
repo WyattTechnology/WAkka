@@ -3,11 +3,9 @@
 open Context
 open CommonActions
 
-type PersistentAction () = class end
+type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>>
 
-type Action<'Result> = ActionBase<'Result, Simple.Action<obj>>
-
-let rec private bind (f: 'a -> Action<'b>) (op: Action<'a>) : Action<'b> =
+let rec private bind (f: 'a -> EventSourcedAction<'b>) (op: EventSourcedAction<'a>) : EventSourcedAction<'b> =
     bindBase f op
 
 type ActorBuilder () =
@@ -24,7 +22,7 @@ module private EventSourcedActor =
 
     type Stopped = Stopped
 
-    type Actor<'Snapshot> (startAction: Action<unit>, _snapshotAction: Option<'Snapshot -> Action<unit>>) as this =
+    type Actor(startAction: EventSourcedAction<unit>) as this =
 
         inherit Akka.Persistence.UntypedPersistentActor ()
 
@@ -49,13 +47,13 @@ module private EventSourcedActor =
 
         and handlePersistAction cont subAction =
             match subAction with
-            | Simple.Action.Done res ->
+            | Simple.SimpleAction.Done res ->
                 this.Persist (res, fun evt -> handleActions false (cont evt))
-            | Simple.Action.Stop _ ->
+            | Simple.SimpleAction.Stop _ ->
                 this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
-            | Simple.Action.Simple next ->
+            | Simple.SimpleAction.Simple next ->
                 handlePersistAction cont (next this)
-            | Simple.Action.Extra (_, next) ->
+            | Simple.SimpleAction.Extra (_, next) ->
                 msgHandler <- (fun _ msg -> handlePersistAction cont (next msg))
 
         and handleRecoveryAction next action stillRecovering msg =
@@ -79,8 +77,6 @@ module private EventSourcedActor =
             match msg with
             | :? Akka.Persistence.RecoveryCompleted ->
                 msgHandler false msg
-//            | :? Akka.Persistence.SnapshotOffer as offer when snapshotAction.IsSome ->
-//                msgHandler <- handleRecoveryAction
             | :? Stopped ->
                 ctx.Stop ctx.Self
             | _ ->
@@ -113,17 +109,8 @@ module private EventSourcedActor =
             member _.ClearRestartHandler () = restartHandler <- None
 
 
-type ActorType<'Snapshot> =
-    | EventSourced of Action<unit>
-    //| EventSourcedWithSnapshots of Action<unit> * ('Snapshot -> Action<unit>)
-
-let eventSourced action = ActorType<unit>.EventSourced action
-
-let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: ActorType<'Snapshot>) =
-    let action, _snapshotHandler =
-        match actorType with
-        | EventSourced action -> action, None
-    let actProps = Akka.Actor.Props.Create(fun () -> EventSourcedActor.Actor<'Snapshot>(action, None))
+let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit>) =
+    let actProps = Akka.Actor.Props.Create(fun () -> EventSourcedActor.Actor(action))
     props.dispatcher |> Option.iter(fun d -> actProps.WithDispatcher d |> ignore)
     props.deploy |> Option.iter(fun d -> actProps.WithDeploy d |> ignore)
     props.mailbox |> Option.iter(fun d -> actProps.WithMailbox d |> ignore)
@@ -139,18 +126,14 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (actorType: Actor
 
 module Actions =
 
-    let private persistObj (action: Simple.Action<obj>): Action<obj> =
+    let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =
         Extra (action, Done)
 
-    let persist (action: Simple.Action<'Msg>): Action<'Result> = actor {
+    let persist (action: Simple.SimpleAction<'Msg>): EventSourcedAction<'Result> = actor {
         let! evt = persistObj (Simple.actor {
             let! res = action
             return (res :> obj)
         })
         return (evt :?> 'Result)
     }
-
-//    static member snapshot (snapshot: 'Snapshot): Action<EventSourcedActor<WithSnapshotting<'Snapshot>>, 'Result> = actor {
-//        return Unchecked.defaultof<_>
-//    }
 

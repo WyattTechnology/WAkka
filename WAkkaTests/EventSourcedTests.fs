@@ -12,6 +12,7 @@ open WAkka.CommonActions
 open WAkka.Simple.Actions
 open WAkka.EventSourced
 open WAkka.EventSourced.Actions
+open WAkka.Spawn
 
 type Msg = {value: int}
 
@@ -433,7 +434,7 @@ let ``crash handler is invoked if actor crashes`` () =
             Context.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Simple.spawn tk.Sys parentProps (Simple.NotPersisted start)
+        let _parent = spawn tk.Sys parentProps (notPersisted start)
 
         let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
         (retype crasher).Tell("crash it", Akka.Actor.ActorRefs.NoSender)
@@ -516,7 +517,7 @@ let ``state is recovered after a crash`` () =
             Context.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Simple.spawn tk.Sys parentProps (Simple.NotPersisted start)
+        let _parent = spawn tk.Sys parentProps (notPersisted start)
 
         let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
         let msg1 = "1"
