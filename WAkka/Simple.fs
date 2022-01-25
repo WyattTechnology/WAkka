@@ -5,8 +5,9 @@ open System
 open Context
 open CommonActions
 
-type SimpleType () = class end
+type SimpleType internal () = class end
 
+/// An action that can only be used directly in a Simple actor (e.g. started using notPersistent or checkpointed).
 type SimpleAction<'Result> = ActionBase<'Result, SimpleType>
 
 let rec private bind (f: 'a -> SimpleAction<'b>) (op: SimpleAction<'a>) : SimpleAction<'b> =
@@ -20,6 +21,7 @@ type ActorBuilder () =
     member this.Combine(m1, m2) = this.Bind (m1, fun _ -> m2)
     member this.Delay f = f ()
 
+/// Builds a SimpleAction.
 let actor = ActorBuilder ()
 
 module private SimpleActor =
@@ -125,6 +127,7 @@ module Actions =
 
     let private doReceive () : SimpleAction<obj> = Extra (SimpleType (), Done)
 
+    /// Wait for a message for which the given function returns `Some`.
     let receive (choose: obj -> Option<'Msg>) =
         let rec recv () = actor {
             match! doReceive () with
@@ -139,6 +142,8 @@ module Actions =
         }
         recv ()
 
+    /// Wait for a message for which the given function returns `Some`. If the timeout is reached before an appropriate
+    /// message is received then None is returned.
     let receiveWithTimeout (choose: obj -> Option<'Msg>, timeout: TimeSpan) =
         let rec recv started (cancel: Akka.Actor.ICancelable) = actor {
             match! doReceive () with
@@ -162,15 +167,21 @@ module Actions =
             return! recv now cancel
         }
 
+    /// Waits for any message to be received.
     let receiveAny () = receive Some
+    /// Waits for any message to be received. If the timeout is reached before a message is received, then None is
+    /// returned.
     let receiveAnyWithTimeout (timeout: TimeSpan) = receiveWithTimeout(Some, timeout)
 
+    /// Waits for a message of the given type to be received.
     let receiveOnly<'Msg> () : SimpleAction<'Msg> =
         receive (fun msg ->
             match msg with
             | :? 'Msg as m -> Some m
             | _ -> None
         )
+    /// Waits for a message of the given type to be received. If the timeout is reached before an appropriate
+    /// message is received then None is returned.
     let receiveOnlyWithTimeout<'Msg> (timeout: TimeSpan) : SimpleAction<Option<'Msg>> =
         receiveWithTimeout (
             (fun msg ->
@@ -181,9 +192,13 @@ module Actions =
             timeout
         )
 
+    /// Gets the sender of the most recently received message.
     let getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
 
+    /// Stashes the most recently received message.
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
+    /// Unstashes the message at the front of the stash.
     let unstashOne () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
+    /// Unstashes all of the messages in the stash.
     let unstashAll () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
 

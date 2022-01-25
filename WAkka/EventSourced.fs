@@ -3,6 +3,7 @@
 open Context
 open CommonActions
 
+/// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
 type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>>
 
 let rec private bind (f: 'a -> EventSourcedAction<'b>) (op: EventSourcedAction<'a>) : EventSourcedAction<'b> =
@@ -16,6 +17,7 @@ type ActorBuilder () =
     member this.Combine(m1, m2) = this.Bind (m1, fun _ -> m2)
     member this.Delay f = f ()
 
+/// Builds an EventSourced action.
 let actor = ActorBuilder ()
 
 module private EventSourcedActor =
@@ -129,6 +131,8 @@ module Actions =
     let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =
         Extra (action, Done)
 
+    /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
+    /// action and return the persisted result instead.
     let persist (action: Simple.SimpleAction<'Msg>): EventSourcedAction<'Result> = actor {
         let! evt = persistObj (Simple.actor {
             let! res = action
