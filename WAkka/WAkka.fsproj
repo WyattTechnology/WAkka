@@ -14,9 +14,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-        <Compile Include="Logger.fs" />
-        <Compile Include="Context.fs" />
-        <Compile Include="CommonActions.fs" />
+        <Compile Include="Common.fs" />
         <Compile Include="Simple.fs" />
         <Compile Include="EventSourced.fs" />
         <Compile Include="Spawn.fs" />
@@ -24,8 +22,8 @@
 
     <ItemGroup>
       <PackageReference Include="Akkling" Version="0.12.0" />
-      <PackageReference Update="FSharp.Core" Version="6.0.1" />
       <PackageReference Include="Akkling.Persistence" Version="0.12.0" />
+      <PackageReference Update="FSharp.Core" Version="5.0.2" />
     </ItemGroup>
 
 </Project>

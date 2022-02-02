@@ -8,10 +8,9 @@ open FsUnitTyped
 open Akkling
 
 open WAkka
-open WAkka.CommonActions
+open WAkka.Common
 open WAkka.Simple.Actions
 open WAkka.EventSourced
-open WAkka.EventSourced.Actions
 open WAkka.Spawn
 
 type Msg = {value: int}
@@ -32,7 +31,7 @@ let ``spawn with name`` () =
                     handle ()
                 )
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
@@ -62,7 +61,7 @@ let ``spawn with no name`` () =
                     handle ()
                 )
             }
-        let act = spawn tk.Sys Context.Props.Anonymous (eventSourced start)
+        let act = spawn tk.Sys Props.Anonymous (eventSourced start)
 
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
@@ -85,7 +84,7 @@ let ``get actor gives correct actor ref`` () =
                 let! act = getActor ()
                 do! typed probe <! act
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         probe.ExpectMsg act |> ignore
 
@@ -99,7 +98,7 @@ let ``get actor context gives correct actor`` () =
                 let! act = unsafeGetActorCtx ()
                 do! typed probe <! act.Self
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -118,7 +117,7 @@ let ``stop action stops the actor`` () =
                 // The actor should stop on the previous line so this message should never be sent
                 do! typed probe <! "should not get this"
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -141,7 +140,7 @@ let ``stop action in perist stops the actor`` () =
                 })
                 // The actor should stop on the previous line so this message should never be sent
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -167,7 +166,7 @@ let ``restart after stop results in stopped actor`` () =
                 do! typed probe <! $"should not get this ({num})"
                 // The actor should stop on the previous line so this message should never be sent
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle 1)
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle 1)
 
         tk.Watch (untyped act) |> ignore
         probe.ExpectMsg (sent 1) |> ignore
@@ -176,7 +175,7 @@ let ``restart after stop results in stopped actor`` () =
         tk.ExpectTerminated (untyped act) |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
-        let act2 = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle 2)
+        let act2 = spawn tk.Sys (Props.Named "test") (eventSourced <| handle 2)
         tk.Watch (untyped act2) |> ignore
         tk.ExpectTerminated (untyped act2, timeout = TimeSpan.FromSeconds 30.0) |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -193,13 +192,13 @@ let ``create actor can create an actor`` () =
         let rec handle () =
             actor {
                 let! _newAct = createChild (fun parent ->
-                    spawn parent Context.Props.Anonymous (eventSourced child)
+                    spawn parent Props.Anonymous (eventSourced child)
                 )
                 let! _ = persist(receiveAny ())
                 return ()
             }
         let _act : ActorRefs.IActorRef<Msg> =
-            spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+            spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         probe.ExpectMsg "created" |> ignore
 
@@ -212,7 +211,7 @@ let ``watch works`` () =
             let! _ = persist(receiveOnly<string> ())
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (eventSourced <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (eventSourced <| otherActor ())
 
         let rec handle () =
             actor {
@@ -228,7 +227,7 @@ let ``watch works`` () =
             do! typed probe <! ""
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         probe.ExpectMsg "" |> ignore
         (retype watched).Tell("", Akka.Actor.ActorRefs.NoSender)
@@ -243,7 +242,7 @@ let ``unwatch works`` () =
             let! _ = persist(receiveOnly<string> ())
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (eventSourced <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (eventSourced <| otherActor ())
 
         let rec handle () =
             actor {
@@ -264,7 +263,7 @@ let ``unwatch works`` () =
             do! typed probe <! "watched"
             return! handle ()
         }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         probe.ExpectMsg "watched" |> ignore
         (retype act).Tell("", Akka.Actor.ActorRefs.NoSender)
@@ -287,7 +286,7 @@ let ``schedule works`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -315,7 +314,7 @@ let ``scheduled messages can be cancelled`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -341,7 +340,7 @@ let ``schedule repeatedly works`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -376,7 +375,7 @@ let ``get sender get's the correct actor`` () =
                 do! typed probe <! ActorRefs.untyped sender
                 return! handle ()
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (eventSourced <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
@@ -393,7 +392,7 @@ let ``select get's the correct selection`` () =
             let! selection = select path
             do! typed probe <! selection
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (eventSourced start)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -425,13 +424,13 @@ let ``crash handler is invoked if actor crashes`` () =
         let start = Simple.actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (eventSourced crashStart)
+                    spawn f (Props.Named "crasher") (eventSourced crashStart)
                 )
             do! typed probe <! crasher
             do! receiveOnly<unit>()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (notPersisted start)
@@ -462,13 +461,13 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (eventSourced crashStart)
+                    spawn f (Props.Named "crasher") (eventSourced crashStart)
                 )
             do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (eventSourced start)
@@ -507,14 +506,14 @@ let ``state is recovered after a crash`` () =
         let start = Simple.actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (eventSourced crashStart)
+                    spawn f (Props.Named "crasher") (eventSourced crashStart)
                 )
             do! typed probe <! crasher
             let! _ = receiveAny ()
             return ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (notPersisted start)

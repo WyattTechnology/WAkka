@@ -7,10 +7,8 @@ open FsUnitTyped
 
 open Akkling
 
-open WAkka
-open WAkka.CommonActions
+open WAkka.Common
 open WAkka.Simple
-open WAkka.Simple.Actions
 open WAkka.Spawn
 
 type Msg = {value: int}
@@ -35,7 +33,7 @@ let ``spawn with name`` () =
                 do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         let m1 = {value = 1234}
         tell act m1
@@ -59,7 +57,7 @@ let ``spawn with no name`` () =
                 do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
-        let act = spawn tk.Sys Context.Props.Anonymous (notPersisted <| handle ())
+        let act = spawn tk.Sys Props.Anonymous (notPersisted <| handle ())
 
         let m1 = {value = 1234}
         tell act m1
@@ -82,7 +80,7 @@ let ``get actor gives correct actor ref`` () =
                 let! act = getActor ()
                 do! ActorRefs.typed probe <! (untyped act)
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -96,7 +94,7 @@ let ``get actor context gives correct actor`` () =
                 let! act = unsafeGetActorCtx ()
                 do! ActorRefs.typed probe <! act.Self
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -113,7 +111,7 @@ let ``stop action stops the actor`` () =
                 // The actor should stop on the previous line so this message should never be sent
                 do! ActorRefs.typed probe <! "should not get this"
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -138,7 +136,7 @@ let ``create actor can create an actor`` () =
                 do! ActorRefs.typed probe <! (untyped newAct)
             }
         let act : ActorRefs.IActorRef<Msg> =
-            spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+            spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
         probe.ExpectMsg (untyped act) |> ignore
@@ -162,7 +160,7 @@ let ``unstash one only unstashes one message at a time`` () =
                     do! stash ()
                     return! handle false
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle false)
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle false)
 
         let m1 = {value = 1}
         tell act m1
@@ -203,7 +201,7 @@ let ``unstash all unstashes all the messages`` () =
                     do! stash ()
                     return! handle false
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle false)
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle false)
 
         let m1 = {value = 1}
         tell act m1
@@ -229,7 +227,7 @@ let ``watch works`` () =
             let! _ = receiveOnly<string> ()
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (notPersisted <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (notPersisted <| otherActor ())
 
         let rec handle () =
             actor {
@@ -245,7 +243,7 @@ let ``watch works`` () =
             do! ActorRefs.typed probe <! ""
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let _act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         probe.ExpectMsg "" |> ignore
         tell (retype watched) ""
@@ -260,7 +258,7 @@ let ``unwatch works`` () =
             let! _ = receiveOnly<string> ()
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (notPersisted <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (notPersisted <| otherActor ())
 
         let rec handle () =
             actor {
@@ -280,7 +278,7 @@ let ``unwatch works`` () =
             do! ActorRefs.typed probe <! "watched"
             return! handle ()
         }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         probe.ExpectMsg "watched" |> ignore
         tell (retype act) ""
@@ -303,7 +301,7 @@ let ``schedule works`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let _act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -331,7 +329,7 @@ let ``scheduled messages can be cancelled`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let _act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -357,7 +355,7 @@ let ``schedule repeatedly works`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let _act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -390,7 +388,7 @@ let ``get sender get's the correct actor`` () =
                 do! ActorRefs.typed probe <! (untyped sender)
                 return! handle ()
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (notPersisted <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (notPersisted <| handle ())
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
@@ -412,7 +410,7 @@ let ``select get's the correct selection`` () =
             let! selection = select path
             do! ActorRefs.typed probe <! selection
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (notPersisted start)
+        let _act = spawn tk.Sys (Props.Named "test") (notPersisted start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -446,13 +444,13 @@ let ``crash handler is invoked if actor crashes`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (notPersisted crashStart)
+                    spawn f (Props.Named "crasher") (notPersisted crashStart)
                 )
             do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (notPersisted start)
@@ -484,13 +482,13 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (notPersisted crashStart)
+                    spawn f (Props.Named "crasher") (notPersisted crashStart)
                 )
             do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (notPersisted start)
@@ -498,4 +496,61 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
         tell (retype crasher) Akka.Actor.Kill.Instance
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+
+type CrashIt = CrashIt
+
+[<Test>]
+let ``state is not recovered after a crash`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec crashHandle recved = actor {
+            match! receiveAny () with
+            | :? string as msg ->
+                let newRecved = msg :: recved
+                do! ActorRefs.typed probe <! String.concat "," newRecved
+                return! crashHandle newRecved
+            | :? CrashIt ->
+                failwith "crashing"
+            | _ ->
+                return! crashHandle recved
+        }
+        let crashStart = actor {
+            do! setRestartHandler (fun _ctx msg err ->
+                tell (typed probe) {msg = msg; err = err}
+            )
+            return! crashHandle []
+        }
+
+        let rec handle () = actor {
+            let! _  = receiveAny ()
+            return! handle ()
+        }
+
+        let start = actor {
+            let! crasher =
+                createChild (fun f ->
+                    spawn f (Props.Named "crasher") (notPersisted crashStart)
+                )
+            do! ActorRefs.typed probe <! crasher
+            return! handle ()
+        }
+        let parentProps = {
+            Props.Named "parent" with
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = spawn tk.Sys parentProps (notPersisted start)
+
+        let crasher : ActorRefs.IActorRef<string> = ActorRefs.retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        let msg1 = "1"
+        tell crasher msg1
+        probe.ExpectMsg msg1 |> ignore
+        let msg2 = "2"
+        tell crasher msg2
+        probe.ExpectMsg $"{msg2},{msg1}"|> ignore
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg3 = "3"
+        tell crasher msg3
+        probe.ExpectMsg $"{msg3}"|> ignore
 

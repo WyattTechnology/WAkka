@@ -7,10 +7,8 @@ open FsUnitTyped
 
 open Akkling
 
-open WAkka
-open WAkka.CommonActions
+open WAkka.Common
 open WAkka.Simple
-open WAkka.Simple.Actions
 open WAkka.Spawn
 
 type Msg = {value: int}
@@ -29,7 +27,7 @@ let ``spawn with name`` () =
                 do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         let m1 = {value = 1234}
         tell act m1
@@ -53,7 +51,7 @@ let ``spawn with no name`` () =
                 do! ActorRefs.typed probe <! msg
                 return! handle ()
             }
-        let act = spawn tk.Sys Context.Props.Anonymous (checkpointed <| handle ())
+        let act = spawn tk.Sys Props.Anonymous (checkpointed <| handle ())
 
         let m1 = {value = 1234}
         tell act m1
@@ -76,7 +74,7 @@ let ``get actor gives correct actor ref`` () =
                 let! act = getActor ()
                 do! ActorRefs.typed probe <! (untyped act)
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -90,7 +88,7 @@ let ``get actor context gives correct actor`` () =
                 let! act = unsafeGetActorCtx ()
                 do! ActorRefs.typed probe <! act.Self
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -107,7 +105,7 @@ let ``stop action stops the actor`` () =
                 // The actor should stop on the previous line so this message should never be sent
                 do! ActorRefs.typed probe <! "should not get this"
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -132,7 +130,7 @@ let ``create actor can create an actor`` () =
                 do! ActorRefs.typed probe <! (untyped newAct)
             }
         let act : ActorRefs.IActorRef<Msg> =
-            spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+            spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         probe.ExpectMsg (untyped act) |> ignore
         probe.ExpectMsg (untyped act) |> ignore
@@ -156,7 +154,7 @@ let ``unstash one only unstashes one message at a time`` () =
                     do! stash ()
                     return! handle false
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle false)
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle false)
 
         let m1 = {value = 1}
         tell act m1
@@ -197,7 +195,7 @@ let ``unstash all unstashes all the messages`` () =
                     do! stash ()
                     return! handle false
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle false)
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle false)
 
         let m1 = {value = 1}
         tell act m1
@@ -223,7 +221,7 @@ let ``watch works`` () =
             let! _ = receiveOnly<string> ()
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (checkpointed <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (checkpointed <| otherActor ())
 
         let rec handle () =
             actor {
@@ -239,7 +237,7 @@ let ``watch works`` () =
             do! ActorRefs.typed probe <! ""
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let _act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         probe.ExpectMsg "" |> ignore
         tell (retype watched) ""
@@ -254,7 +252,7 @@ let ``unwatch works`` () =
             let! _ = receiveOnly<string> ()
             return ()
         }
-        let watched = spawn tk.Sys (Context.Props.Named "watched") (checkpointed <| otherActor ())
+        let watched = spawn tk.Sys (Props.Named "watched") (checkpointed <| otherActor ())
 
         let rec handle () =
             actor {
@@ -274,7 +272,7 @@ let ``unwatch works`` () =
             do! ActorRefs.typed probe <! "watched"
             return! handle ()
         }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         probe.ExpectMsg "watched" |> ignore
         tell (retype act) ""
@@ -297,7 +295,7 @@ let ``schedule works`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let _act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -325,7 +323,7 @@ let ``scheduled messages can be cancelled`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let _act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -351,7 +349,7 @@ let ``schedule repeatedly works`` () =
             do! ActorRefs.typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let _act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -384,7 +382,7 @@ let ``get sender get's the correct actor`` () =
                 do! ActorRefs.typed probe <! (untyped sender)
                 return! handle ()
             }
-        let act = spawn tk.Sys (Context.Props.Named "test") (checkpointed <| handle ())
+        let act = spawn tk.Sys (Props.Named "test") (checkpointed <| handle ())
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
@@ -406,7 +404,7 @@ let ``select get's the correct selection`` () =
             let! selection = select path
             do! ActorRefs.typed probe <! selection
         }
-        let _act = spawn tk.Sys (Context.Props.Named "test") (checkpointed start)
+        let _act = spawn tk.Sys (Props.Named "test") (checkpointed start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -440,13 +438,13 @@ let ``crash handler is invoked if actor crashes`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (checkpointed crashStart)
+                    spawn f (Props.Named "crasher") (checkpointed crashStart)
                 )
             do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (checkpointed start)
@@ -478,13 +476,13 @@ let ``crash handler is not invoked if handler is cleared`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (checkpointed crashStart)
+                    spawn f (Props.Named "crasher") (checkpointed crashStart)
                 )
             do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (checkpointed start)
@@ -526,13 +524,13 @@ let ``state is recovered after a crash`` () =
         let start = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawn f (Context.Props.Named "crasher") (checkpointed crashStart)
+                    spawn f (Props.Named "crasher") (checkpointed crashStart)
                 )
             do! ActorRefs.typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
-            Context.Props.Named "parent" with
+            Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
         let _parent = spawn tk.Sys parentProps (checkpointed start)

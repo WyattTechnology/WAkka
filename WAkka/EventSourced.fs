@@ -1,7 +1,6 @@
 ﻿module WAkka.EventSourced
 
-open Context
-open CommonActions
+open Common
 
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
 type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>>
@@ -98,7 +97,7 @@ module private EventSourcedActor =
 
         interface IActionContext with
             member _.Self = ctx.Self
-            member _.Logger = Logger.Logger logger
+            member _.Logger = Logger logger
             member _.Sender = ctx.Sender
             member _.Scheduler = ctx.System.Scheduler
             member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
@@ -126,6 +125,7 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action:
             parent.ActorOf(actProps)
     Akkling.ActorRefs.typed act
 
+[<AutoOpen>]
 module Actions =
 
     let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =

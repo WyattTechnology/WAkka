@@ -2,8 +2,7 @@
 
 open System
 
-open Context
-open CommonActions
+open Common
 
 type SimpleType internal () = class end
 
@@ -83,11 +82,13 @@ module private SimpleActor =
             restartHandler |> Option.iter(fun h -> h this msg err)
             if persist then
                 ctx.Self.Tell({checkpoint = checkpoint; restartHandler = restartHandler}, ctx.Self)
+            else
+                ctx.Self.Tell({checkpoint = None; restartHandler = None}, ctx.Self)
             base.PreRestart (err, msg)
 
         interface IActionContext with
             member _.Self = ctx.Self
-            member _.Logger = Logger.Logger logger
+            member _.Logger = Logger logger
             member _.Sender = ctx.Sender
             member _.Scheduler = ctx.System.Scheduler
             member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
@@ -120,7 +121,7 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist
     act.Tell({SimpleActor.checkpoint = None; SimpleActor.restartHandler = None}, act)
     Akkling.ActorRefs.typed act
 
-
+[<AutoOpen>]
 module Actions =
 
     type private Timeout = {started: DateTime}

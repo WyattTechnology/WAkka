@@ -18,7 +18,7 @@ let eventSourced action = EventSourced action
 
 /// Creates a new actor that is a child of the given parent. The actor will be created using the given properties and
 /// actor type. A reference to the new actor will be returned.
-let spawn (parent: Akka.Actor.IActorRefFactory) (props: Context.Props) (actorType: ActorType) =
+let spawn (parent: Akka.Actor.IActorRefFactory) (props: Common.Props) (actorType: ActorType) =
 
     match actorType with
     | NotPersisted action ->
