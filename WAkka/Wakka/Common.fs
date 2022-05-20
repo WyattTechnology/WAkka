@@ -1,28 +1,30 @@
 ﻿module WAkka.Common
 
 /// A logger tied to an actor.
-type Logger internal (logger: Akka.Event.ILoggingAdapter) =
+type Logger internal (ctx: Akka.Actor.IActorContext) =
+    let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+
     /// Log the given message at the given level.
-    member _.Log level msg = logger.Log (level, msg)
+    member _.Log level (msg: string) = logger.Log (level, msg)
 
     ///Log the given exception.
     member _.LogException (err: exn) = logger.Error err.Message
 
     ///Log the given message at the debug level.
-    member _.Debug msg = logger.Debug msg
+    member _.Debug (msg: string) = logger.Debug msg
 
     ///Log the given message at the info level.
-    member _.Info msg = logger.Info msg
+    member _.Info (msg: string) = logger.Info msg
 
     ///Log the given message at the warning level.
-    member _.Warning msg = logger.Warning msg
+    member _.Warning (msg: string) = logger.Warning msg
 
     ///Log the given message at the error level.
-    member _.Error msg = logger.Error msg
-    member _.Errorf fmt = Printf.kprintf logger.Error fmt
+    member _.Error (msg: string) = logger.Error msg
 
 /// An actor context.
 type IActorContext =
+    abstract member Context: Akka.Actor.IActorContext
     /// The reference for the actor.
     abstract member Self: Akka.Actor.IActorRef
     /// The logger for the actor.
@@ -91,12 +93,17 @@ module CommonActions =
         | Stop of (unit -> ActionBase<'Result, 'ExtraArg>)
         | Extra of 'ExtraArg * (obj -> ActionBase<'Result, 'ExtraArg>)
 
-    let rec internal bindBase (f: 'a -> ActionBase<'b, 't>) (op: ActionBase<'a, 't>) : ActionBase<'b, 't> =
+    let rec bindBase (f: 'a -> ActionBase<'b, 't>) (op: ActionBase<'a, 't>) : ActionBase<'b, 't> =
         match op with
         | Done res -> f res
         | Simple cont -> Simple (cont >> bindBase f)
         | Stop cont -> Stop (cont >> bindBase f)
         | Extra (extra, cont) -> Extra (extra, cont >> bindBase f)
+
+    /// Maps the result of an action using the given function
+    let mapResult f action = action |> bindBase (fun a -> Done (f a))
+    /// Ignores the result of an action.
+    let ignoreResult action = mapResult ignore action
 
     let internal  doSchedule delay (receiver: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) =
         Simple (fun ctx ->
@@ -124,7 +131,11 @@ module CommonActions =
     let getLogger () = Simple (fun ctx -> Done ctx.Logger)
 
     /// Stops this actor.
-    let stop () = Stop Done
+    let stop () =
+        // This weird dance is here so that the result of stop can adapt to the context that is it called in and
+        // we dont have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
+        // Action<'Result, 'a> is expected and 'Result is not unit.
+        bindBase (fun () -> Done Unchecked.defaultof<'Result>) (Stop Done)
 
     /// Creates a child of this actor. The given function will be passed an IActorRefFactory to use as the parent for the child actor.
     let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
@@ -162,3 +173,6 @@ module CommonActions =
 module Operators =
     /// Sends the given message to the given actor.
     let inline (<!) (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg : ActionBase<unit, 'Extra> = send recv msg
+
+    /// Sends the given message to the given actor immediately, will not sequence into an actor computation expression.
+    let tellNow (actor: Akkling.ActorRefs.IActorRef<'msg>) (msg: 'msg) = actor.Tell(msg, Akka.Actor.ActorCell.GetCurrentSelfOrNoSender())

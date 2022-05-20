@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
-        <TargetFramework>netstandard2.0</TargetFramework>
         <GenerateDocumentationFile>true</GenerateDocumentationFile>
+        <TargetFrameworks>net48;netstandard2.0;netstandard2.1</TargetFrameworks>
     </PropertyGroup>
 
     <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
@@ -16,6 +16,7 @@
     <ItemGroup>
         <Compile Include="Common.fs" />
         <Compile Include="Simple.fs" />
+        <Compile Include="ActorResult.fs" />
         <Compile Include="EventSourced.fs" />
         <Compile Include="Spawn.fs" />
     </ItemGroup>
@@ -24,6 +25,7 @@
       <PackageReference Include="Akkling" Version="0.12.0" />
       <PackageReference Include="Akkling.Persistence" Version="0.12.0" />
       <PackageReference Update="FSharp.Core" Version="5.0.2" />
+      <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
     </ItemGroup>
 
 </Project>

@@ -13,8 +13,16 @@ type ActorBuilder () =
     member this.Return x = Done x
     member this.ReturnFrom x = x
     member this.Zero () = Done ()
-    member this.Combine(m1, m2) = this.Bind (m1, fun _ -> m2)
-    member this.Delay f = f ()
+    member this.Combine(m1, m2) = this.Bind (m1, m2)
+    member this.Delay (f: unit -> EventSourcedAction<'t>): (unit -> EventSourcedAction<'t>) = f
+    member this.Run f = f ()
+    member this.For(values, f) : ActionBase<unit, 't> =
+        match Seq.tryHead values with
+        | Some head ->
+            let next () = this.For (Seq.tail values, f)
+            bindBase next (f head)
+        | None ->
+            Done ()
 
 /// Builds an EventSourced action.
 let actor = ActorBuilder ()
@@ -28,7 +36,6 @@ module private EventSourcedActor =
         inherit Akka.Persistence.UntypedPersistentActor ()
 
         let ctx = Akka.Persistence.Eventsourced.Context
-        let logger = Akka.Event.Logging.GetLogger ctx
         let mutable restartHandler = Option<RestartHandler>.None
 
         let mutable msgHandler = fun (_recovering: bool) _ -> ()
@@ -63,7 +70,10 @@ module private EventSourcedActor =
             else
                 handlePersistAction next action
 
-        do msgHandler <- (fun recovering msg -> logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}")
+        do msgHandler <- (fun recovering msg ->
+            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
+        )
 
         override this.PersistenceId = ctx.Self.Path.ToString()
 
@@ -71,6 +81,7 @@ module private EventSourcedActor =
             msgHandler false msg
 
         override _.OnPersistRejected(cause, event, sequenceNr) =
+            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
             ctx.Stop ctx.Self
 
@@ -84,10 +95,12 @@ module private EventSourcedActor =
                 msgHandler true msg
 
         override _.OnRecoveryFailure(reason, message) =
+            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"recovery failed on message {message}: {reason}"
             ctx.Stop ctx.Self
 
         override this.PreRestart(reason, message) =
+            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Actor crashed on {message}: {reason}"
             restartHandler |> Option.iter (fun handler -> handler this message reason)
             base.PreRestart(reason, message)
@@ -96,8 +109,9 @@ module private EventSourcedActor =
             handleActions true startAction
 
         interface IActionContext with
+            member _.Context = ctx
             member _.Self = ctx.Self
-            member _.Logger = Logger logger
+            member _.Logger = Logger ctx
             member _.Sender = ctx.Sender
             member _.Scheduler = ctx.System.Scheduler
             member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
@@ -141,3 +155,49 @@ module Actions =
         return (evt :?> 'Result)
     }
 
+///Maps the given function over the given array within an actor expression.
+let mapArray (func: 'a -> EventSourcedAction<'b>) (values: 'a []) : EventSourcedAction<'b []> =
+    let rec loop (results: 'b []) i = ActorBuilder () {
+        if i < values.Length then
+            let! res = func values.[i]
+            results.[i] <- res
+            return! loop results (i + 1)
+        else
+            return results
+    }
+    loop (Array.zeroCreate values.Length) 0
+
+///Maps the given function over the given list within an actor expression.
+let mapList (func: 'a -> EventSourcedAction<'b>) (values: List<'a>) : EventSourcedAction<List<'b>> =
+    let rec loop (left: List<'a>) (results: List<'b>) = ActorBuilder () {
+        match left with
+        | head::tail ->
+            let! res = func head
+            return! loop tail (res :: results)
+        | [] ->
+            return List.rev results
+    }
+    loop values []
+
+///Folds the given function over the given sequence of actions within an actor expression.
+let foldActions (func: 'a -> 'res -> EventSourcedAction<'res>) (init: 'res) (values: seq<EventSourcedAction<'a>>) : EventSourcedAction<'res> =
+    let rec loop left cur = actor {
+        if Seq.isEmpty left then
+            return cur
+        else
+            let! value = Seq.head left
+            let! res = func value cur
+            return! loop (Seq.tail left) res
+    }
+    loop values init
+
+///Folds the given function over the given sequence within an actor expression.
+let foldValues (func: 'a -> 'res -> EventSourcedAction<'res>) (init: 'res) (values: seq<'a>) : EventSourcedAction<'res> =
+    let rec loop left cur = ActorBuilder () {
+        if Seq.isEmpty left then
+            return cur
+        else
+            let! res = func (Seq.head left) cur
+            return! loop (Seq.tail left) res
+    }
+    loop values init
