@@ -49,7 +49,7 @@ let printMsg =
 
 ## Including in another project
 
-WAkka is set up to work with [wtc-code-sync](http://softdevgit.wyatt.com/devutilities/wtc-code-sync). See the instructions there for how to integrate it as a sub-project in an application project.
+This project is published as a Nuget package at `\\wyatt-data3\SoftwareDevBU\LocalNugetPackages`. To include that directory as a Nuget source in your project, first create a NuGet.config file in the root of your source tree (see [here](https://docs.microsoft.com/en-us/nuget/consume-packages/configuring-nuget-behavior)). In that file list `\\wyatt-data3\SoftwareDevBU\LocalNugetPackages` as a source with a name that makes sense. Once that is done, the `WAkka` package should be available to install in projects.
 
 ## Usage
 
@@ -177,3 +177,20 @@ This actor runs the `handleMsg` action in a simple context. It looks for a `stri
 
 Note that in order to have event sourced actor state survive a process restart, you will have to configure a persistence back-end when starting the actor system. That is beyond the scope of this document.
 
+## Versioning
+
+This project follows the [NuGet version of semantic versioning](https://docs.microsoft.com/en-us/nuget/concepts/package-versioning). In short, the version number is `Major.Minor.Patch-Suffix` where changes to the components of the version are made for:
+* Major: Breaking changes to existing functionality
+* Minor: New functionality, no breaking changes to existing functionality
+* Patch: Bug fixes to existing functionality
+* Suffix: Used to denote *special* versions (e.g. development version)
+
+A shortcut to set the version on both assembly is to use the `set-version` target of the included build project (Wtc.FakeUtilities uses itself as a build system).
+
+## Development
+
+Before publishing (see below) a new version you should make changes and test those changes with the project that is consuming the changes. The first step is easy, just clone the repo and work like normal. The last step is more difficult, but not too bad. First, go into the nuget settings for the WtcFakeUtilities project and add a suffix to the version, e.g. `-dev`. When the WAkka~~~~ project is built it will generate a NuGet package. The location of this package will be shown in the build output. The directory that the package is built into needs to be added to the consuming project's NuGet.config file as a source. Once this is done, the `dev` version of the package should now be available in consuming project's NuGet interface. Upgrade the consuming project to the `dev` version. You can now test the consuming project's use of the change made. Note that if you make more changes to this project you will need to remove the existing package from your NuGet cache (C:\Users\<user name>\.nuget\packages) in order for your updated package to be used. When done, remove the `dev` suffix from the package version and publish the package (see below).
+
+## Publishing
+
+When you are ready to publish changes to this library, first increase the version number following the requirements laid out above. Merge your changes, along with the version number change, to the main branch. Now tag your commit with `Version-<version number>`. This will trigger the CI to build the NuGet package and publish it at `\\wyatt-data3\SoftwareDevBU\LocalNugetPackages`. Any consuming projects that need your changes can now be updated to use the new version.
