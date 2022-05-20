@@ -1,10 +1,29 @@
-build_and_test:
+build_library:
   stage:
     build
   tags:
     - WAkka
+  except:
+    - tags
   script:
-    - dotnet test -c Release
+    - pwsh runBuild.ps1 -Target pipeline -Release -Detail
   interruptible:
     true
 
+publish_on_tag:
+  stage:
+    deploy
+  tags:
+    - WAkka
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^Version-\d+\.\d+\.\d+$/
+  script:
+    - rmdir /s package
+    - pwsh ci-pack.ps1
+    - cd package
+    - copy *.nupkg \\wyatt-data3\SoftwareDevBU\LocalNugetPackages
+  artifacts:
+    name: "%CI_PROJECT_NAME%-%CI_JOB_NAME%-%CI_COMMIT_REF_NAME%"
+    when: on_success
+    paths:
+      - package/*.nupkg
