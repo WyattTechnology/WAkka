@@ -2,4 +2,7 @@ bin
 obj
 .idea
 *.DotSettings.user
+**/coverage
+coverage.xml
+summary.xml
 

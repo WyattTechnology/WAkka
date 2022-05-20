@@ -5,11 +5,14 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Files", "Files", "{3226A2F9
 		readme.md = readme.md
 		global.json = global.json
 		WAkka-ci.yml = WAkka-ci.yml
+		.gitignore = .gitignore
 	EndProjectSection
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkka", "WAkka\Wakka\WAkka.fsproj", "{8651030A-6A4D-4E01-8EB2-876BC5C8A9B7}"
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkkaTests", "WAkka\WAkkaTests\WAkkaTests.fsproj", "{3B756DF1-5A84-42F3-8225-DAB510032945}"
+EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "build", "build\build.fsproj", "{3EEB2D63-922C-4820-B360-2F9D3FAEEC07}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -25,5 +28,9 @@ Global
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3EEB2D63-922C-4820-B360-2F9D3FAEEC07}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3EEB2D63-922C-4820-B360-2F9D3FAEEC07}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3EEB2D63-922C-4820-B360-2F9D3FAEEC07}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3EEB2D63-922C-4820-B360-2F9D3FAEEC07}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
