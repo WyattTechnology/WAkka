@@ -120,12 +120,15 @@ let ``get actor context gives correct actor`` () =
         probe.ExpectMsg (untyped act) |> ignore
 
 [<Test>]
-let ``stop action stops the actor`` () =
+let ``stop action calls stop handlers and stops the actor`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
         let rec handle () =
             actor {
+                let! id = setStopHandler(fun _ctx -> tellNow (typed probe) "message1")
+                let! _ = setStopHandler(fun _ctx -> tellNow (typed probe) "message2")
+                do! clearStopHandler id
                 do! persist( Simple.actor {
                     let! _msg = Receive.Only<Msg> ()
                     return ()
@@ -140,6 +143,7 @@ let ``stop action stops the actor`` () =
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
         tk.ExpectTerminated (untyped act) |> ignore
+        probe.ExpectMsg "message2" |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
@@ -514,7 +518,7 @@ let ``state is recovered after a crash`` () =
             return! crashHandle newRecved
         }
         let crashStart = actor {
-            do! setRestartHandler (fun _ctx msg err ->
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
                 (typed probe).Tell({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
             )
             return! crashHandle []

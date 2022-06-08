@@ -20,6 +20,7 @@
 
     <ItemGroup>
         <Compile Include="Common.fs" />
+        <Compile Include="LifeCycleHandlers.fs" />
         <Compile Include="Simple.fs" />
         <Compile Include="ActorResult.fs" />
         <Compile Include="EventSourced.fs" />

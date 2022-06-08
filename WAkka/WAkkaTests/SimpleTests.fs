@@ -1135,12 +1135,13 @@ let ``sleep with ignoring ignores messages`` ([<ValueSource("actorFunctions")>] 
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 type CrashMsg = {
+    id: int
     msg: obj
     err: obj
 }
 
 [<Test>]
-let ``crash handler is invoked if actor crashes`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+let ``crash handlers are invoked if actor crashes`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -1155,8 +1156,11 @@ let ``crash handler is invoked if actor crashes`` ([<ValueSource("actorFunctions
             return! handle ()
         }
         let crashStart = actor {
-            do! setRestartHandler (fun _ctx msg err ->
-                tell (typed probe) {msg = msg; err = err}
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                tell (typed probe) {id = 1; msg = msg; err = err}
+            )
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                tell (typed probe) {id = 2; msg = msg; err = err}
             )
             return! crashHandle ()
         }
@@ -1177,8 +1181,9 @@ let ``crash handler is invoked if actor crashes`` ([<ValueSource("actorFunctions
         let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
         tell (retype crasher) "crash it"
         let res = probe.ExpectMsg<CrashMsg>()
-        res.msg :?> string |> ignore
-        res.err :?> Exception |> ignore
+        res.id |> shouldEqual 1
+        let res = probe.ExpectMsg<CrashMsg>()
+        res.id |> shouldEqual 2
 
 [<Test>]
 let ``crash handler is not invoked if handler is cleared`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
@@ -1190,12 +1195,20 @@ let ``crash handler is not invoked if handler is cleared`` ([<ValueSource("actor
             return! handle ()
         }
 
+        let rec crashHandle () = actor {
+            let! _  = Receive.Only<string> ()
+            failwith "crashed"
+            return! handle ()
+        }
         let crashStart = actor {
-            do! setRestartHandler (fun _ctx msg err ->
-                tell (typed probe) {msg = msg; err = err}
+            let! id = setRestartHandler (fun (_ctx, msg, err) ->
+                tell (typed probe) {id = 1; msg = msg; err = err}
             )
-            do! clearRestartHandler ()
-            return! handle()
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                tell (typed probe) {id = 2; msg = msg; err = err}
+            )
+            do! clearRestartHandler id
+            return! crashHandle()
         }
 
         let start = actor {
@@ -1213,6 +1226,62 @@ let ``crash handler is not invoked if handler is cleared`` ([<ValueSource("actor
         let _parent = spawn tk.Sys parentProps (makeActor start)
 
         let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
-        tell (retype crasher) Akka.Actor.Kill.Instance
+        tell (retype crasher) "crash it"
+        let res = probe.ExpectMsg<CrashMsg>()
+        res.id |> shouldEqual 2
+        probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+
+type StopMsg = {id: int}
+
+[<Test>]
+let ``stop handlers are invoked if actor stops`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () = actor {
+            let! _  = Receive.Only<string> ()
+            return! stop ()
+        }
+        let start = actor {
+            let! _ = setStopHandler (fun _ctx ->
+                tell (typed probe) {id = 1}
+            )
+            let! _ = setStopHandler (fun _ctx ->
+                tell (typed probe) {id = 2}
+            )
+            return! handle ()
+        }
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor start)
+
+        tell (retype actor) "stop it"
+        let res = probe.ExpectMsg<StopMsg>()
+        res.id |> shouldEqual 1
+        let res = probe.ExpectMsg<StopMsg>()
+        res.id |> shouldEqual 2
+
+[<Test>]
+let ``stop handler is not invoked if handler is cleared`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () = actor {
+            let! _  = Receive.Only<string> ()
+            return! stop ()
+        }
+        let start = actor {
+            let! id = setStopHandler (fun _ctx ->
+                tell (typed probe) {id = 1}
+            )
+            let! _ = setStopHandler (fun _ctx ->
+                tell (typed probe) {id = 2}
+            )
+            do! clearStopHandler id
+            return! handle ()
+        }
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor start)
+
+        tell (retype actor) "stop it"
+        let res = probe.ExpectMsg<StopMsg>()
+        res.id |> shouldEqual 2
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 

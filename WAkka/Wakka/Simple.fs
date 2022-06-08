@@ -60,7 +60,8 @@ module private SimpleActor =
 
     type Start = {
         checkpoint: Option<obj -> unit>
-        restartHandler: Option<RestartHandler>
+        restartHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>
+        stopHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext>
     }
 
     type Actor (persist: bool, startAction: SimpleAction<unit>) as this =
@@ -70,7 +71,9 @@ module private SimpleActor =
         let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
         let mutable stash = Unchecked.defaultof<Akka.Actor.IStash>
 
-        let mutable restartHandler = Option<RestartHandler>.None
+        let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+        let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+        
         let logger = Logger ctx
 
         let mutable msgHandler = fun msg ->
@@ -281,9 +284,7 @@ module private SimpleActor =
                             runFinally newHandler
                             cont' (Error err)
                         )
-
-
-
+                        
         and waitForMsg (handler: obj -> unit) (msg:obj) : unit =
             match msg with
             | :? Start -> ()
@@ -292,7 +293,8 @@ module private SimpleActor =
         let waitForStart (msg:obj) =
             match msg with
             | :? Start as start ->
-                restartHandler <- start.restartHandler
+                restartHandlers <- start.restartHandlers
+                stopHandlers <- start.stopHandlers
                 match start.checkpoint with
                 | None ->
                     handleActions startAction
@@ -309,13 +311,27 @@ module private SimpleActor =
         override _.PreRestart(err: exn, msg: obj) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Actor restarting after message {msg}: {err}"
-            restartHandler |> Option.iter(fun h -> h this msg err)
-            if persist then
-                ctx.Self.Tell({checkpoint = Some msgHandler; restartHandler = restartHandler}, ctx.Self)
-            else
-                ctx.Self.Tell({checkpoint = None; restartHandler = None}, ctx.Self)
+            restartHandlers.ExecuteHandlers (this :> IActorContext, msg, err)
+            let startMsg = 
+                if persist then
+                    {
+                        checkpoint = Some msgHandler
+                        restartHandlers = restartHandlers
+                        stopHandlers = stopHandlers
+                    }
+                else
+                    {
+                        checkpoint = None
+                        restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+                        stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+                    }
+            ctx.Self.Tell(startMsg, ctx.Self)
             base.PreRestart (err, msg)
-
+        
+        override _.PostStop () =
+            stopHandlers.ExecuteHandlers (this :> IActorContext)
+            base.PostStop()
+            
         interface IActionContext with
             member _.Context = ctx
             member _.Self = ctx.Self
@@ -328,8 +344,10 @@ module private SimpleActor =
             member _.ActorSelection (path: string) = ctx.ActorSelection path
             member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
             member _.Stash = stash
-            member _.SetRestartHandler handler = restartHandler <- Some handler
-            member _.ClearRestartHandler () = restartHandler <- None
+            member _.SetRestartHandler handler = restartHandlers.AddHandler handler
+            member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
+            member this.SetStopHandler handler = stopHandlers.AddHandler handler
+            member this.ClearStopHandler id = stopHandlers.RemoveHandler id
 
         interface Akka.Actor.IWithUnboundedStash with
             member _.Stash
@@ -349,7 +367,12 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist
             parent.ActorOf(actProps, name)
         | None ->
             parent.ActorOf(actProps)
-    act.Tell({SimpleActor.checkpoint = None; SimpleActor.restartHandler = None}, act)
+    let startMsg : SimpleActor.Start = {
+        checkpoint = None
+        restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+        stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+    }
+    act.Tell(startMsg, act)
     Akkling.ActorRefs.typed act
 
 [<AutoOpen>]

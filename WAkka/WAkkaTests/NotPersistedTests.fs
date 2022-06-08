@@ -36,7 +36,7 @@ let ``state is not recovered after a crash`` () =
                 return! crashHandle recved
         }
         let crashStart = actor {
-            do! setRestartHandler (fun _ctx msg err ->
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
                 tell (typed probe) {msg = msg; err = err}
             )
             return! crashHandle []

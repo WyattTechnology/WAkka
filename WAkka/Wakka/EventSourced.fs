@@ -36,7 +36,9 @@ module private EventSourcedActor =
         inherit Akka.Persistence.UntypedPersistentActor ()
 
         let ctx = Akka.Persistence.Eventsourced.Context
-        let mutable restartHandler = Option<RestartHandler>.None
+
+        let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+        let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
 
         let mutable msgHandler = fun (_recovering: bool) _ -> ()
 
@@ -102,11 +104,15 @@ module private EventSourcedActor =
         override this.PreRestart(reason, message) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Actor crashed on {message}: {reason}"
-            restartHandler |> Option.iter (fun handler -> handler this message reason)
+            restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
             base.PreRestart(reason, message)
 
         override _.PreStart () =
             handleActions true startAction
+            
+        override _.PostStop () =
+            stopHandlers.ExecuteHandlers (this :> IActorContext)
+            base.PostStop ()
 
         interface IActionContext with
             member _.Context = ctx
@@ -120,8 +126,10 @@ module private EventSourcedActor =
             member _.ActorSelection (path: string) = ctx.ActorSelection path
             member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
             member _.Stash = this.Stash
-            member _.SetRestartHandler handler = restartHandler <- Some handler
-            member _.ClearRestartHandler () = restartHandler <- None
+            member _.SetRestartHandler handler = restartHandlers.AddHandler handler
+            member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
+            member _.SetStopHandler handler = stopHandlers.AddHandler handler
+            member _.ClearStopHandler id = stopHandlers.RemoveHandler id
 
 
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit>) =

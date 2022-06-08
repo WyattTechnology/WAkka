@@ -46,14 +46,19 @@ type IActorContext =
 
 /// A function the can be passed to the setRestartHandler action. The function is passed the actor context, the message
 /// that was being processed when the crash happened, and the exception that caused the crash.
-type RestartHandler = IActorContext -> obj -> exn -> unit
+type RestartHandler = IActorContext * obj * exn -> unit
+
+/// A function the can be passed to the setPostStopHandler action. The function is passed the actor context.
+type StopHandler = IActorContext -> unit
 
 type internal IActionContext =
     inherit IActorContext
 
     abstract member Stash: Akka.Actor.IStash
-    abstract member SetRestartHandler: RestartHandler -> unit
-    abstract member ClearRestartHandler: unit -> unit
+    abstract member SetRestartHandler: RestartHandler -> int
+    abstract member ClearRestartHandler: int -> unit
+    abstract member SetStopHandler: StopHandler -> int
+    abstract member ClearStopHandler: int -> unit
 
 /// Actor Properties.
 type Props = {
@@ -162,12 +167,18 @@ module CommonActions =
     /// Gets an actor selection for the given path.
     let selectPath (path: Akka.Actor.ActorPath) = Simple (fun ctx -> Done (ctx.ActorSelection path))
 
-    /// Set the function to call if the actor restarts. If there is already a restart handler set, then this function will
-    /// replace it. The function is passed the actor context, the message that was being processed when the crash happened,
-    /// and the exception that caused the crash.
+    /// Add a function to call if the actor restarts. The function is passed the actor context, the message that was
+    /// being processed when the crash happened, and the exception that caused the crash. This action returns an ID
+    /// that can be used to remove the handler via the clearRestartHandler action.
     let setRestartHandler handler = Simple (fun ctx -> Done (ctx.SetRestartHandler handler))
     /// Clears the restart handler.
-    let clearRestartHandler () = Simple (fun ctx -> Done (ctx.ClearRestartHandler ()))
+    let clearRestartHandler id = Simple (fun ctx -> Done (ctx.ClearRestartHandler id))
+
+    /// Add a function to call when the actor stop. The function is passed the actor context. This action returns an ID
+    /// that can be used to remove the handler via the clearPostStopHandler action.
+    let setStopHandler handler = Simple (fun ctx -> Done (ctx.SetStopHandler handler))
+    /// Clears the restart handler.
+    let clearStopHandler id = Simple (fun ctx -> Done (ctx.ClearStopHandler id))
 
 [<AutoOpen>]
 module Operators =
