@@ -117,6 +117,32 @@ let ``receive only with stash strategy stashes other messages`` ([<ValueSource("
         probe.ExpectMsg otherMsg |> ignore
 
 [<Test>]
+let ``receive any with timeout will timeout`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let expected = "test"
+        
+        let _act = spawn tk.Sys (Props.Named "test") (makeActor (actor {
+            let! msg = Receive.Any(TimeSpan.FromMilliseconds 100.0)
+            match msg with
+            | Some _ -> do! ActorRefs.typed probe <! msg
+            | None -> do! ActorRefs.typed probe <! expected
+        }))
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 100.0)
+        let mutable tries = 0
+        let mutable gotMsg = false
+        while not gotMsg && tries < 5 do
+            (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
+            try
+                probe.ExpectMsg expected |> ignore
+                gotMsg <- true
+            with
+            | _err ->
+                tries <- tries + 1
+        gotMsg |> shouldEqual true
+
+[<Test>]
 let ``get actor gives correct actor ref`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
