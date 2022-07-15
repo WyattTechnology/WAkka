@@ -23,7 +23,7 @@ let ``spawn with name`` () =
         let rec start =
             actor {
                 do!
-                    persist (
+                    persistSimple (
                         let rec handle () = Simple.actor {
                             let! msg = Receive.Only<Msg> ()
                             do! (typed probe) <! msg
@@ -53,7 +53,7 @@ let ``spawn with no name`` () =
         let rec start =
             actor {
                 do!
-                    persist (
+                    persistSimple (
                         let rec handle () =
                             Simple.actor {
                                 let! msg = Receive.Only<Msg> ()
@@ -129,7 +129,7 @@ let ``stop action calls stop handlers and stops the actor`` () =
                 let! id = setStopHandler(fun _ctx -> tellNow (typed probe) "message1")
                 let! _ = setStopHandler(fun _ctx -> tellNow (typed probe) "message2")
                 do! clearStopHandler id
-                do! persist( Simple.actor {
+                do! persistSimple( Simple.actor {
                     let! _msg = Receive.Only<Msg> ()
                     return ()
                 })
@@ -153,7 +153,7 @@ let ``stop action in perist stops the actor`` () =
 
         let rec handle () =
             actor {
-                do! persist (Simple.actor {
+                do! persistSimple (Simple.actor {
                     let! _msg = Receive.Only<Msg> ()
                     do! stop ()
                     do! typed probe <! "should not get this"
@@ -178,7 +178,7 @@ let ``restart after stop results in stopped actor`` () =
 
         let rec handle num =
             actor {
-                do! persist (Simple.actor {
+                do! persistSimple (Simple.actor {
                         do! typed probe <! sent num
                         let! _ = Receive.Any ()
                         return! stop ()
@@ -214,7 +214,7 @@ let ``create actor can create an actor`` () =
                 let! _newAct = createChild (fun parent ->
                     spawn parent Props.Anonymous (eventSourced child)
                 )
-                let! _ = persist(Receive.Any ())
+                let! _ = persistSimple(Receive.Any ())
                 return ()
             }
         let _act : ActorRefs.IActorRef<Msg> =
@@ -228,14 +228,14 @@ let ``watch works`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = actor {
-            let! _ = persist(Receive.Only<string> ())
+            let! _ = persistSimple(Receive.Only<string> ())
             return ()
         }
         let watched = spawn tk.Sys (Props.Named "watched") (eventSourced <| otherActor ())
 
         let rec handle () =
             actor {
-                match! persist(Receive.Any ()) with
+                match! persistSimple(Receive.Any ()) with
                 | MessagePatterns.Terminated (act, _, _) ->
                     do! typed probe <!  act
                     return! stop ()
@@ -259,14 +259,14 @@ let ``unwatch works`` () =
         let probe = tk.CreateTestProbe "probe"
 
         let rec otherActor () = actor {
-            let! _ = persist(Receive.Only<string> ())
+            let! _ = persistSimple(Receive.Only<string> ())
             return ()
         }
         let watched = spawn tk.Sys (Props.Named "watched") (eventSourced <| otherActor ())
 
         let rec handle () =
             actor {
-                let! msg = persist(Receive.Any ())
+                let! msg = persistSimple(Receive.Any ())
                 match msg :> obj with
                 | :? string ->
                     do! unwatch watched
@@ -298,7 +298,7 @@ let ``schedule works`` () =
 
         let rec handle () =
             actor {
-                let! _msg = persist(Receive.Any ())
+                let! _msg = persistSimple(Receive.Any ())
                 return! handle ()
             }
         let start = actor {
@@ -325,7 +325,7 @@ let ``scheduled messages can be cancelled`` () =
 
         let rec handle () =
             actor {
-                let! _msg = persist(Receive.Any ())
+                let! _msg = persistSimple(Receive.Any ())
                 return! handle ()
             }
         let start = actor {
@@ -352,7 +352,7 @@ let ``schedule repeatedly works`` () =
 
         let rec handle () =
             actor {
-                let! _msg = persist(Receive.Any ())
+                let! _msg = persistSimple(Receive.Any ())
                 return! handle ()
             }
         let start = actor {
@@ -388,7 +388,7 @@ let ``get sender get's the correct actor`` () =
 
         let rec handle () =
             actor {
-                let! sender = persist(Simple.actor {
+                let! sender = persistSimple(Simple.actor {
                     let! _ = Receive.Only<string> ()
                     return! getSender ()
                 })
@@ -502,9 +502,71 @@ type CrashIt = CrashIt
 let ``state is recovered after a crash`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
+        let events = tk.CreateTestProbe ()
+        
+        let rec crashHandle recved = actor {
+            let! res = persist(Simple.actor{
+                match! Receive.Any() with
+                | :? string as msg ->
+                    let newRecved = msg :: recved
+                    do! typed probe <! String.concat "," newRecved
+                    return newRecved
+                | :? CrashIt ->
+                    return failwith "Crashing"
+                | _ ->
+                    return recved
+            })
+            match res with
+            | ActionResult newRecved -> 
+                return! crashHandle newRecved
+            | other ->
+                tellNow (typed events) other
+                return! crashHandle recved
+        }
+        let crashStart = actor {
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                (typed probe).Tell({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
+            )
+            return! crashHandle []
+        }
+
+        let start = Simple.actor {
+            let! crasher =
+                createChild (fun f ->
+                    spawn f (Props.Named "crasher") (eventSourced crashStart)
+                )
+            do! typed probe <! crasher
+            let! _ = Receive.Any ()
+            return ()
+        }
+        let parentProps = {
+            Props.Named "parent" with
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = spawn tk.Sys parentProps (notPersisted start)
+
+        let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        events.ExpectMsg PersistResult<List<string>>.RecoveryDone |> ignore
+        let msg1 = "1"
+        crasher.Tell(msg1, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg msg1 |> ignore
+        let msg2 = "2"
+        crasher.Tell(msg2, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msg2},{msg1}"|> ignore
+        (retype crasher).Tell(CrashIt, Akka.Actor.ActorRefs.NoSender)
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg3 = "3"
+        crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
+        events.ExpectMsg PersistResult<List<string>>.RecoveryDone |> ignore
+
+[<Test>]
+let ``state is recovered after a crash with simple persist`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
 
         let rec crashHandle recved = actor {
-            let! newRecved = persist(Simple.actor{
+            let! newRecved = persistSimple(Simple.actor{
                 match! Receive.Any() with
                 | :? string as msg ->
                     let newRecved = msg :: recved
@@ -552,4 +614,4 @@ let ``state is recovered after a crash`` () =
         crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
 
-
+//TODO: Needs tests for persistence rejection and recovery failure

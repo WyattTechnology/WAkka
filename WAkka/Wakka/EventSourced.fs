@@ -3,12 +3,8 @@
 open Common
 
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
-type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>*bool>
+type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>>
 
-type PersistedEvent<'Result> =
-    | Persisted of 'Result
-    | ReplayDone
-    
 let rec private bind (f: 'a -> EventSourcedAction<'b>) (op: EventSourcedAction<'a>) : EventSourcedAction<'b> =
     bindBase f op
 
@@ -34,18 +30,24 @@ let actor = ActorBuilder ()
 module private EventSourcedActor =
 
     type Stopped = Stopped
+    
+    type PersistenceMsg =
+        | Completed
+        | Failed of exn * obj
+        | Rejected of result:obj * reason:exn * sequenceNr:int64
 
     type Actor(startAction: EventSourcedAction<unit>) as this =
 
         inherit Akka.Persistence.UntypedPersistentActor ()
 
         let ctx = Akka.Persistence.Eventsourced.Context
-
+        
         let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
         let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
 
         let mutable msgHandler = fun (_recovering: bool) _ -> ()
-
+        let mutable rejectionHandler = fun (_result:obj, _reasons: exn, _sequenceNr: int64)  -> ()
+        
         let rec handleActions recovering action =
             match action with
             | Done _
@@ -53,28 +55,24 @@ module private EventSourcedActor =
                 ctx.Stop ctx.Self
             | Simple next ->
                 handleActions recovering (next this)
-            | Extra ((subAction, _isChecked), next) ->
+            | Extra (subAction, next) ->
                 if recovering then
-                    msgHandler <- handleRecoveryAction next subAction
+                    msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                 else
-                    handlePersistAction next subAction
+                    handleSubActions next subAction
 
-        and handlePersistAction cont subAction =
+        and handleSubActions cont subAction =
             match subAction with
             | Simple.SimpleAction.Done res ->
+                rejectionHandler <- (fun (result, reason, sn) -> handleActions false (cont (Rejected (result, reason, sn) :> obj)))
                 this.Persist (res, fun evt -> handleActions false (cont evt))
             | Simple.SimpleAction.Stop _ ->
+                rejectionHandler <- (fun _ -> ctx.Stop ctx.Self)
                 this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
             | Simple.SimpleAction.Simple next ->
-                handlePersistAction cont (next this)
+                handleSubActions cont (next this)
             | Simple.SimpleAction.Extra (_, next) ->
-                msgHandler <- (fun _ msg -> handlePersistAction cont (next msg))
-
-        and handleRecoveryAction next action stillRecovering msg =
-            if stillRecovering then
-                handleActions true (next msg)
-            else
-                handlePersistAction next action
+                msgHandler <- (fun _ msg -> handleSubActions cont (next msg))
 
         do msgHandler <- (fun recovering msg ->
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -89,12 +87,12 @@ module private EventSourcedActor =
         override _.OnPersistRejected(cause, event, sequenceNr) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
-            ctx.Stop ctx.Self
+            rejectionHandler (event, cause, sequenceNr)
 
         override _.OnRecover (msg: obj) =
             match msg with
             | :? Akka.Persistence.RecoveryCompleted ->
-                msgHandler false msg
+                msgHandler false (Completed :> obj)
             | :? Stopped ->
                 ctx.Stop ctx.Self
             | _ ->
@@ -103,7 +101,7 @@ module private EventSourcedActor =
         override _.OnRecoveryFailure(reason, message) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"recovery failed on message {message}: {reason}"
-            ctx.Stop ctx.Self
+            msgHandler false (Failed (reason, message) :> obj)
 
         override this.PreRestart(reason, message) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -136,8 +134,10 @@ module private EventSourcedActor =
             member _.ClearStopHandler id = stopHandlers.RemoveHandler id
 
 
+open EventSourcedActor
+
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit>) =
-    let actProps = Akka.Actor.Props.Create(fun () -> EventSourcedActor.Actor(action))
+    let actProps = Akka.Actor.Props.Create(fun () -> Actor(action))
     props.dispatcher |> Option.iter(fun d -> actProps.WithDispatcher d |> ignore)
     props.deploy |> Option.iter(fun d -> actProps.WithDeploy d |> ignore)
     props.mailbox |> Option.iter(fun d -> actProps.WithMailbox d |> ignore)
@@ -154,28 +154,78 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action:
 [<AutoOpen>]
 module Actions =
 
-    let private persistObj (isChecked, action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =
-        Extra ((action, isChecked), Done)
+    let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =
+        Extra (action, Done)        
+    
+    /// The result of applying persist to a SimpleAction.
+    type PersistResult<'Result> =
+        /// The action was executed and produced the given result, or the result was read from the event log if recovering.
+        | ActionResult of 'Result
+        /// The action was executed, but the result was rejected for the given reason by the persistence system.
+        | ActionResultRejected of result:'Result * reason:exn * sequenceNr:int64
+        /// Recovery was running, but has now finished. The action was not executed and should be repeated if its
+        /// result is needed.  
+        | RecoveryDone
+        /// Recovery was running, but has failed due to the given reason while processing the given message. The action
+        /// was not executed.
+        | RecoveryFailed of reason:exn * message:obj
+    
+    /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
+    /// action and return the persisted result instead. This version of persist will return persistence lifecycle events
+    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned then
+    /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
+    /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
+    /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
+    /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned. 
+    let persist (action: Simple.SimpleAction<'Result>): EventSourcedAction<PersistResult<'Result>> =
+        let rec getEvt () = actor {
+            let! evt = persistObj (Simple.actor {
+                let! res = action
+                return (res :> obj)
+            })
+            match evt with
+            | :? 'Result ->
+                return ActionResult (evt :?> 'Result)
+            | :? PersistenceMsg as pMsg ->
+                match pMsg with
+                | Completed ->
+                    return RecoveryDone
+                | Failed(reason, msg) ->
+                    //already logged the error in OnRecoveryFailed
+                    return RecoveryFailed (reason, msg)
+                | Rejected(result, reason, sequenceNr) ->
+                    return ActionResultRejected (result :?> 'Result, reason, sequenceNr)
+            | _ ->
+                return! getEvt ()
+        }
+        getEvt ()
 
     /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
-    /// action and return the persisted result instead.
-    let persist (action: Simple.SimpleAction<'Result>): EventSourcedAction<'Result> = actor {
-        let! evt = persistObj (false, Simple.actor {
-            let! res = action
-            return (res :> obj)
-        })
-        return (evt :?> 'Result)
-    }
-
-    /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
-    /// action and return the persisted result instead.
-    let persistWithReplayCheck (action: Simple.SimpleAction<'Result>): EventSourcedAction<PersistedEvent<'Result>> = actor {
-        let! evt = persistObj (true, Simple.actor {
-            let! res = action
-            return (res :> obj)
-        })
-        return Persisted (evt :?> 'Result)
-    }
+    /// action and return the persisted result instead. This version of persist will not return persistence lifecycle
+    /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
+    /// If a result is produced then it was either read from the event log if recovering or the product of executing the
+    /// action if not recovering. Unlike persist, persistSimple will always execute its action.
+    let persistSimple (action: Simple.SimpleAction<'Result>): EventSourcedAction<'Result> =
+        let rec getEvt () = actor {
+            let! evt = persistObj (Simple.actor {
+                let! res = action
+                return (res :> obj)
+            })
+            match evt with
+            | :? 'Result ->
+                return (evt :?> 'Result)
+            | :? PersistenceMsg as recovery ->
+                match recovery with
+                | Completed ->
+                    return! getEvt ()
+                | Failed _
+                | Rejected _ ->
+                    //already logged the error in OnRecoveryFailed
+                    return! stop ()
+            | _ ->
+                return! getEvt ()
+        }
+        getEvt ()
 
 ///Maps the given function over the given array within an actor expression.
 let mapArray (func: 'a -> EventSourcedAction<'b>) (values: 'a []) : EventSourcedAction<'b []> =
