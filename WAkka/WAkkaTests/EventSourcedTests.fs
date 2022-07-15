@@ -615,3 +615,25 @@ let ``state is recovered after a crash with simple persist`` () =
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
 
 //TODO: Needs tests for persistence rejection and recovery failure
+
+[<Test>]
+let ``isRecovering gives correct results`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+        
+        let action = actor {
+            let! res1 = isRecovering ()
+            if res1 then
+                do! (typed probe) <! "Was recovering at start"
+            let! recDone = persist(Simple.actor {return ()})
+            if recDone = RecoveryDone then
+                do! (typed probe) <! "Got RecoveryDone"
+            let! res2 = isRecovering ()
+            if not res2 then
+                do! (typed probe) <! "Was not recovering after RecoveryDone"
+        }
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced action)
+
+        probe.ExpectMsg "Was recovering at start" |> ignore
+        probe.ExpectMsg "Got RecoveryDone" |> ignore
+        probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore

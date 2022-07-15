@@ -2,8 +2,12 @@
 
 open Common
 
+type EventSourcedExtra =
+    | RunAction of Simple.SimpleAction<obj>
+    | GetRecovering
+    
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
-type EventSourcedAction<'Result> = ActionBase<'Result, Simple.SimpleAction<obj>>
+type EventSourcedAction<'Result> = ActionBase<'Result, EventSourcedExtra>
 
 let rec private bind (f: 'a -> EventSourcedAction<'b>) (op: EventSourcedAction<'a>) : EventSourcedAction<'b> =
     bindBase f op
@@ -55,11 +59,15 @@ module private EventSourcedActor =
                 ctx.Stop ctx.Self
             | Simple next ->
                 handleActions recovering (next this)
-            | Extra (subAction, next) ->
-                if recovering then
-                    msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
-                else
-                    handleSubActions next subAction
+            | Extra (extra, next) ->
+                match extra with
+                | RunAction subAction ->
+                    if recovering then
+                        msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
+                    else
+                        handleSubActions next subAction
+                | GetRecovering ->
+                    handleActions recovering (next recovering)
 
         and handleSubActions cont subAction =
             match subAction with
@@ -155,7 +163,7 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action:
 module Actions =
 
     let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj> =
-        Extra (action, Done)        
+        Extra (RunAction action, Done)        
     
     /// The result of applying persist to a SimpleAction.
     type PersistResult<'Result> =
@@ -227,6 +235,12 @@ module Actions =
         }
         getEvt ()
 
+    /// Gets the recovery state of the actor.
+    let isRecovering () : EventSourcedAction<bool> = actor {
+        let! res = Extra(GetRecovering, Done)
+        return (res :?> bool)
+    }
+    
 ///Maps the given function over the given array within an actor expression.
 let mapArray (func: 'a -> EventSourcedAction<'b>) (values: 'a []) : EventSourcedAction<'b []> =
     let rec loop (results: 'b []) i = ActorBuilder () {
