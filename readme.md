@@ -151,7 +151,9 @@ These actions can only be used directly in a simple actor (i.e. those started wi
 
 These actions can only be used in an event sourced actor (i.e. those started using `eventSourced`).
 
-* `persist`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned.
+* `persist`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. The result of `persist` is a `PersistResult` which is either the result of the action, or a lifecycle event (recovery finished, recovery failed, or the result of the simple action was rejected by the persistence system).
+* `persistSimple`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. Just the result of the simple action is returned, persistence lifecycle events are filtered out. If an action result is rejected by the persistence system or recovery fails then the actor will be stopped.
+* `isRecovering`: Gets whether the actor is currently recovering or not.
 
 To make the stateful example above work as an event sourced actor we would do:
 
@@ -167,7 +169,7 @@ let rec handleMsg () = Simple.actor {
 }
 
 let rec handle state = EventSourced.actor {
-    let! newState = EventSourced.Actions.persist(handleMsg ())
+    let! newState = EventSourced.Actions.persistSimple(handleMsg ())
     return! handle newState
     
 let act = Spawn.spawn parent Context.Props.Anonymous (Spawn.eventSourced <| handle "")
