@@ -142,8 +142,9 @@ module CommonActions =
         // Action<'Result, 'a> is expected and 'Result is not unit.
         bindBase (fun () -> Done Unchecked.defaultof<'Result>) (Stop Done)
 
-    /// Creates a child of this actor. The given function will be passed an IActorRefFactory to use as the parent for the child actor.
-    let createChild (make: Akka.Actor.IActorRefFactory -> Akkling.ActorRefs.IActorRef<'Msg>) =
+    /// Creates a child of this actor. The given function will be passed an IActorRefFactory to use as the parent for
+    /// the child actor and the function's result will be the result of the action.
+    let createChild (make: Akka.Actor.IActorRefFactory -> 'Result) =
         Simple (fun ctx -> Done (make ctx.ActorFactory))
 
     /// Sends a the given message to the given actor. Also see the "<!" operator.
