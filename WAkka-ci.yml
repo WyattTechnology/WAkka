@@ -6,7 +6,7 @@ build_library:
   except:
     - tags
   script:
-    - pwsh runBuild.ps1 -Target pipeline -Release -Detail
+    - pwsh RunTests.ps1 -Config Release
   interruptible:
     true
 
