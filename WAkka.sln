@@ -8,6 +8,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Files", "Files", "{3226A2F9
 		.gitignore = .gitignore
 		ci-pack.ps1 = ci-pack.ps1
 		run-tests.ps1 = run-tests.ps1
+		LICENSE = LICENSE
 	EndProjectSection
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkka", "WAkka\Wakka\WAkka.fsproj", "{8651030A-6A4D-4E01-8EB2-876BC5C8A9B7}"
