@@ -1,6 +1,6 @@
 # WAkka (aka Wyatt Akka)
 
-This is another interface for using Akka from F#. The computation expression approach in both the standard F# interface for Akka.NET and Akkling breaks composability. The type associated with the computation expression is `Effect<'Msg>` and a computation expression must always evaluate to this type. This means that you can't implement a function that filters messages and then call that from within the actor computation expression. For example, the following will not work:
+This is another interface for using [Akka.NET](https://getakka.net) from F#. The computation expression approach in both the standard F# interface for Akka.NET and [Akkling](https://github.com/Horusiath/Akkling) breaks composability. The type associated with the computation expression is `Effect<'Msg>` and a computation expression must always evaluate to this type. This means that you can't implement a function that filters messages and then call that from within the actor computation expression. For example, the following will not work:
 ```f#
 open Akkling
 
@@ -53,20 +53,25 @@ This project is published as a Nuget package at `\\wyatt-data3\SoftwareDevBU\Loc
 
 ## Usage
 
-### Actions
-In WAkka, actors are implemented using the `actor` CE which evaluates to `ActionBase<'Type, 'ActorType>` where `'Type` is the type that the action evaluates to (`'ActorType` is used to restrict certain actions to certain types of actors, e.g. those that use or don't use persistence).The elements of `actor` CE themselves evaluate to `ActionBase<'Type, 'ActorType>`. For example, the `receiveAny` action used above evaluates to `ActionBase<obj, 'AT>` meaning that it will evaluate to an `obj` when a message is available.
+WAkka is built on top of Akka.NET and Akkling. It uses the typed actor references from Akkling, and the general infrastructure from Akka.NET. The actor system should be started as though you're using Akkling. Then, the creation of actors should be done as shown below. 
 
-Recursion is used process more than one message. For example, an actor that just processes each message that it receives, possibly keeping some sort of state, can be implemented as:
+Note that the Akkling `<!` (*tell* operator) can cause unexpected behavior in WAkka computation expressions. In order to avoid this, WAkka also overrides this operator to behave properly in computation expressions. If both WAkka and Akkling modules are opened, then WAkka must be opened after Akkling so that WAkka's definition of the operator will be used. To send messages outside of a computation expression, the `tellNow` function is provided (open the `WAkka.Common` module to use it).
+
+### Actions
+In WAkka, actors are implemented using the `actor` CE which evaluates to `ActionBase<'Type, 'ActorType>` where `'Type` is the type that the action evaluates to and `'ActorType` is used to restrict certain actions to certain types of actors(e.g., those that use or don't use persistence). The elements of the `actor` CE themselves evaluate to `ActionBase<'Type, 'ActorType>`. For example, the `Receive.Any` action used above evaluates to `ActionBase<obj, 'ActorType>` meaning that it will evaluate to an `obj` when a message is available.
+
+Recursion is used to process more than one message. For example, an actor that just processes each message that it receives, possibly keeping some sort of state, can be implemented as:
 
 ```f#
 open WAkka.Simple
 
 let rec handle state = actor {
-    match! receieveAny() with 
+    match! Receieve.Any() with 
     | :? string as newState -> 
         return! handle newState
     | _ -> 
         return! handle state
+}
 ```
 
 It is also possible to construct *workflow* actors that run a set number of steps instead of processing messages in a loop. For example:
@@ -76,9 +81,10 @@ open WAkka.Simple
 open WAkka.CommonActions
 
 let workflow = actor {
-    let! msg1 = receiveOnly<string>()
-    let! msg2 = receiveOnly<string>()
+    let! msg1 = Receive.Only<string>()
+    let! msg2 = Receive.Only<string>()
     do! someActor <! $"Got two messages: {msg1}, {msg2}"
+}
 ```
 
 This actor would wait for two messages, then send a message to another actor, and finally stop (reaching the end of the CE will cause the actor to stop).
@@ -107,10 +113,10 @@ let act2 = Spawn.spawn parent Context.Props.Anonymous (Spawn.notPersistent workf
 In this case the actors were started with no persistence. To use checkpointing just substitute `Spawn.checkpointed` for `Spawn.notPersistent`. As they stand, the actions are not compatible with `Spawn.eventSourced` which would start an actor that uses Akka.NET persistence (see the built-in `persist` action below).
 
 ### Built-in actions
-Actor computation expressions are built using the actions built into WAkka. So far we've seen `receiveAny`, `receiveOnly`, and `send` (in the guise of the `<!` operator) in the examples above. There are three classes of built-in actions:
+Actor computation expressions are built using the actions built into WAkka. So far we've seen `Receive.Any`, `Receive.Only`, and `send` (in the guise of the `<!` operator) in the examples above. There are three classes of built-in actions:
 
 * Common: Actions that can be used in any context.
-* Simple: Actions that can only be used in *simple* contexts (i.e. these cannot be directly used in CE's that define an event sourced actor).
+* Simple: Actions that can only be used in *simple* contexts (i.e., these cannot be directly used in CE's that define an event sourced actor).
 * EventSourced: Actions that can only be used in an event sourced context.
 
 #### Common Actions
@@ -119,7 +125,7 @@ These actions can be used directly in both simple and event sourced actors.
 
 * `getActor`: Get the reference for this actor.
 * `unsafeGetActorCtx`: Gets the actor context for this actor as a `WAkka.Context.IActorContext`. Normally this context is not needed, its functionality is available through the built-in actions.
-* `getLogger`: Gets an `WAkka.Logger.Logger` for this actor.
+* `getLogger`: Gets an `WAkka.Logger.Logger` for this actor which can be used to log messages through the Akka.NET logging system.
 * `stop`: Stops this actor.
 * `createChild`: Creates a child of this actor. The given function will be passed an `IActorRefFactory` to use when creating the new actor.
 * `send`: Send the given message to the given actor. We also override the `<!` operator to do this (the Akkling version of this operator should not be used in an actor CE, it can cause unexpected behavior).
@@ -129,23 +135,64 @@ These actions can be used directly in both simple and event sourced actors.
 * `scheduleRepeatedly`: Similar to `schedule`, but after the first send, the message will be sent repeatedly with the given interval between sends.
 * `select`: Get an actor selection for the given path.
 * `selectPath`: Get an actor selection for the given path.
-* `setRestartHandler`: Sets a function to be called if the actor restarts. The function will be passed the actor context, message that was being processed when the crash happened, and the exception. If a restart handler was already set, then it will be replaced.
-* `clearRestartHandler`: Clears any restart handler that is set.
+* `setRestartHandler`: Sets a function to be called if the actor restarts. The function will be passed the actor context, message that was being processed when the crash happened, and the exception. The action returns an ID that can be used to remove the handler via the `clearRestartHandler` action. 
+* `clearRestartHandler`: Clears any restart handler that was set using the `setRestartHandler` action.
+* `setStopHandler`: Sets a function to be called if the actor stops. The function will be passed the actor context. The action returns an ID that can be used to remove the handler via the `clearStopHandler` action. 
+* `clearStopHandler`: Clears any stop handler that was set using the `setStopHandler` action.
 
+The `Common` module also contains functions to change the result type of an action:
+* `ignoreResult`: Ignore the result of a given action, makes things behave as though the result of the action is `unit`.
+* `mapResult`: Apply a given function to the result of an action. Changes an action's result type to that of the function.
+* 
 #### Simple actions
 
-These actions can only be used directly in a simple actor (i.e. those started with `notPersisted` or `checkpointed`).
+These actions can only be used directly in a simple actor (i.e. those started with `notPersisted` or `checkpointed`)
 
-* `receive`: Wait for a message that satisfies the given filter function (i.e. one for which the function returns `Some`)
-* `receiveWithTimeout`: Same as `receive`, but if the given timeout is hit then `None` is returned.
-* `receiveAny`: Waits for any message to be received.
-* `receiveAnyWithTimeout`: Waits for any message to be received. `None` is returned if the timeout is hit before a message is received.
-* `receiveOnly<'Msg>`: Wait for a message of the given type.
-* `receiveOnlyWithTimeout<'Msg>`: Wait for a message of the given type. `None` is returned if the timeout is hit before a message is received.
+* `Receive`: Static methods of this class are used to receive messages. Each method has an optional timeout and those that filter messages have a *strategy* for dealing with messages that are filtered out. You can make custom *other message strategies*, but the most useful are already provided in `ignoreOthers` and 'stashOthers'. `ignoreOthers`, which is the default, will ignore any messages that are filtered out. `stashOthers` will stash messages that are filtered out, and then unstash them when a message satisfies the filter.
+  * `Any`: Receive the next message (no filtering).
+  * `Filter`: Receive messages until one is received that satisfies the given filter.
+  * `Only<'Type>`: Receives messages until one of type `'Type` is received.
 * `getSender`: Gets the sender of the most recently received message.
+* `sleep`: Applies the given *other messages strategy` to any messages received for the given amount of time. 
 * `stash`: Stashes the most recently received message.
 * `unstashOne`: Unstashes the message at the front of the stash.
 * `unstashAll`: Unstashes all stashed messages.
+
+There are also functions for doing maps and folds of actions:
+
+* `mapArray`: Applies a function whose result is an action and applies it an array of values generating an action that evaluates each of the generated actions capturing their results in an array which become the result of the action.
+* `mapList`: Same as `mapArray`, but works with lists instead of arrays.
+* `foldActions`: takes an initial value of type `'res`, a sequence of actions of type `'a`, and function `'res -> 'a -> Action<'res>`. Creates an action that evaluates the first action from the sequence, passes its result and the initial value to the function and evaluates the resulting action. The result of this action becomes the `'res` value that is combined with the result of the next action from the sequence using the function. This continues until the sequence of actions is exhausted, at which point the final `'res` value is the result of the action.
+* `foldValues`: Works similar to `foldActions`, except that an sequence of values is passed in instead of an array of actions and the values in the sequence are used directly in when evaluating the function to generate sub-actions.
+* `executeWhile`: Executes a *condition* action, if it returns `Some` then the result is passed to the body function and the resulting action executed. Repeats until the condition action evaluates to `None`.
+
+#### Actor Result
+
+It is often useful to have actions that evaluate to the `Result` type. The `ActorResult` module defines a computation expression that combines these two types. I.e., the CE will execute actions until it runs out or an action evaluates to `Error`. The result of the CE is `Ok <value>` if it makes it to the end without getting an `Error`. `<value>` will be the return value of the CE. If an `Error` is encountered than the CE's value will be that error. Note that all elements in the CE must have the same `Error` type, but their `Ok` types can differ.
+
+The `actorResult` builder is used to build an actor result CE and it is run by passing it to `runActorResult`. For example:
+```f#
+let act = actor {
+    return! runActorResult (actorResult{
+        let! msg = ofActor(Receive.Only<Result<string, string>>())
+        return $"message was {msg}"
+    })
+}
+```
+would wait for a message of type `Result<string, string>`. If it receives `Ok <message>` then the result of running `act` would be `Ok "message was <message>"` since the `return $message...` line would be executed. But if the message received was `Error <error>` then the `return ...` line would be skipped and the result of `act` would be `Error err`. 
+
+The `ActorResult` module contains more functions to make working with this CE easier:
+
+* `retn`, `ok`: Wrap the given value so that it evaluates to `Ok <value>`.
+* `returnError`, `error`: Wrap the given value so that is evaluates to `Error <value>`.
+* `map`: Applies the given function to the value of an action if that action evaluates to `Ok`. The result of the function is wrapped in `Ok`.
+* `mapError`: Similar to `map`, but acts on `Error` instead of `Ok`.
+* `orElse`: Evaluates an action, the evaluates another action if the first action evaluates to `Error`. Designed to be chaining using the `|>` operator: `action1 |> orElse action2 |> orElse action3...`.
+* `orElseWith`: Similar to `orElse`, but the action to evaluate in the error case is generated by a function that is passed the error value.
+* `ignore`: Ignores the `Ok` part fo a result converting it from `ActorResult<'a, 'e>` to `ActorResult<unit, 'e>`.
+* Many functions for converting other types, like booleans, `Option`, etc. to `ActorResult`. They all start with `require`.
+* `ofActor`: Runs the given actor action and wraps the result in `Ok`.
+* `ofResult`: Converts a `Result` to an `ActorResult` that evaluates to the original result.
 
 #### Event sourced actions
 
@@ -161,7 +208,7 @@ To make the stateful example above work as an event sourced actor we would do:
 open WAkka
 
 let rec handleMsg () = Simple.actor {
-    match! Simple.Actions.receieveAny() with 
+    match! Simple.Actions.Receieve.Any() with 
     | :? string as newState when newState <> "" -> 
         return newState
     | _ -> 
@@ -178,6 +225,8 @@ let act = Spawn.spawn parent Context.Props.Anonymous (Spawn.eventSourced <| hand
 This actor runs the `handleMsg` action in a simple context. It looks for a `string` message, when one is received, the simple action finishes with that string message as its result. The `persist` action that `handleMsg` was running in then persists this message and returns it. `handle` then recurses with the new state. If the actor were to crash then all the calls to `persist` would skip calling `handleMsg` and return the persisted results instead. Once the persisted results are exhausted, `persist` will begin calling `handleMsg` again. 
 
 Note that in order to have event sourced actor state survive a process restart, you will have to configure a persistence back-end when starting the actor system. That is beyond the scope of this document.
+
+Also note: WAkka does not currently support checkpointing in the Akka persistence system.
 
 ## Versioning
 

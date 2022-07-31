@@ -205,7 +205,7 @@ module CommonActions =
     /// Clears the restart handler.
     let clearRestartHandler id = Simple (fun ctx -> Done (ctx.ClearRestartHandler id))
 
-    /// Add a function to call when the actor stop. The function is passed the actor context. This action returns an ID
+    /// Add a function to call when the actor stops. The function is passed the actor context. This action returns an ID
     /// that can be used to remove the handler via the clearPostStopHandler action.
     let setStopHandler handler = Simple (fun ctx -> Done (ctx.SetStopHandler handler))
     /// Clears the restart handler.
