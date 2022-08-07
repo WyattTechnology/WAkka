@@ -47,6 +47,16 @@ let printMsg =
     }
 ```
 
+## Should you use this?
+
+That's always a difficult question to answer in a general fashion for a library since every possible user of the library is working under different constraints. One question that will affect everyone: is it stable? As far as we can tell the answer is yes. The library has been through multiple iterations internally at Wyatt Technology in multiple products and appears to be solid. That being said, as with all open source software, no warranty is implied or given. 
+
+Note that the library has a few limitations:
+* Checkpointing is currently not supported for actors that use the Akka persistence system. You will see *checkpointed* actors below, but those actors use a different system to achieve persistence and are only persistent against actor crashes, not actor system crashes. 
+* Remote deployment of actors is currently not supported.
+
+Also, performance of actors built with WAkka lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the WAkka actor gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. This performance difference can probably be addressed, there just hasn't been any effort put into it yet.
+
 ## Including in another project
 
 This project is published as a Nuget package at `\\wyatt-data3\SoftwareDevBU\LocalNugetPackages`. To include that directory as a Nuget source in your project, first create a NuGet.config file in the root of your source tree (see [here](https://docs.microsoft.com/en-us/nuget/consume-packages/configuring-nuget-behavior)). In that file list `\\wyatt-data3\SoftwareDevBU\LocalNugetPackages` as a source with a name that makes sense. Once that is done, the `WAkka` package should be available to install in projects.
