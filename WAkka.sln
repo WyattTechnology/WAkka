@@ -15,6 +15,8 @@ Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkka", "WAkka\Wakka\WAkka.
 EndProject
 Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "WAkkaTests", "WAkka\WAkkaTests\WAkkaTests.fsproj", "{3B756DF1-5A84-42F3-8225-DAB510032945}"
 EndProject
+Project("{F2A71F9B-5D33-465A-A702-920D77279786}") = "PerformanceTest", "PerformanceTest\PerformanceTest.fsproj", "{9C25CBFC-07E5-47E7-800D-3953FF119149}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -29,5 +31,9 @@ Global
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{3B756DF1-5A84-42F3-8225-DAB510032945}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9C25CBFC-07E5-47E7-800D-3953FF119149}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9C25CBFC-07E5-47E7-800D-3953FF119149}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9C25CBFC-07E5-47E7-800D-3953FF119149}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9C25CBFC-07E5-47E7-800D-3953FF119149}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

@@ -297,7 +297,7 @@ let ``unwatch works`` () =
         let rec handle () =
             actor {
                 let! msg = persistSimple(Receive.Any ())
-                match msg :> obj with
+                match msg with
                 | :? string ->
                     do! unwatch watched
                     do! typed probe <! "unwatched"
