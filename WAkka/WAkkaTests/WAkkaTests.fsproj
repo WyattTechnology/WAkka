@@ -17,7 +17,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\WAkka\WAkka.fsproj" />
+      <ProjectReference Include="..\Wakka\WAkka.fsproj" />
     </ItemGroup>
 
     <ItemGroup>
