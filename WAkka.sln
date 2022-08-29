@@ -4,10 +4,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Files", "Files", "{3226A2F9
 	ProjectSection(SolutionItems) = preProject
 		readme.md = readme.md
 		global.json = global.json
-		WAkka-ci.yml = WAkka-ci.yml
 		.gitignore = .gitignore
-		ci-pack.ps1 = ci-pack.ps1
-		run-tests.ps1 = run-tests.ps1
 		LICENSE = LICENSE
 	EndProjectSection
 EndProject
