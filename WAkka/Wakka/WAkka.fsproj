@@ -6,7 +6,6 @@
     <AssemblyVersion>1.3.0</AssemblyVersion>
     <FileVersion>1.3.0</FileVersion>
     <Authors>Wyatt Technology</Authors>
-    <PackageLicenseFile>LICENSE.txt</PackageLicenseFile>
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
     <PackageProjectUrl>https://github.com/WyattTechnology/WAkka</PackageProjectUrl>
@@ -43,7 +42,6 @@
     <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="../../LICENSE.txt" Pack="true" Visible="false" PackagePath="" />
     <None Include="../../readme.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
