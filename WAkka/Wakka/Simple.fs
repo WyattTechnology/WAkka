@@ -385,12 +385,17 @@ module private SimpleActor =
                 and set newStash = stash <- newStash
 
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist: bool) (action: SimpleAction<unit>) =
-    let actProps = Akka.Actor.Props.Create(fun () -> SimpleActor.Actor(persist, action))
-    props.dispatcher |> Option.iter(fun d -> actProps.WithDispatcher d |> ignore)
-    props.deploy |> Option.iter(fun d -> actProps.WithDeploy d |> ignore)
-    props.mailbox |> Option.iter(fun d -> actProps.WithMailbox d |> ignore)
-    props.router |> Option.iter(fun d -> actProps.WithRouter d |> ignore)
-    props.supervisionStrategy |> Option.iter(fun d -> actProps.WithSupervisorStrategy d |> ignore)
+    let applyMod arg modifier current =
+        match arg with
+        | Some a -> modifier a current
+        | None -> current    
+    let actProps =
+        Akka.Actor.Props.Create(fun () -> SimpleActor.Actor(persist, action))
+        |> applyMod props.dispatcher (fun d a -> a.WithDispatcher d)
+        |> applyMod props.deploy (fun d a -> a.WithDeploy d)
+        |> applyMod props.mailbox (fun d a -> a.WithMailbox d)
+        |> applyMod props.router (fun d a -> a.WithRouter d)
+        |> applyMod props.supervisionStrategy (fun d a -> a.WithSupervisorStrategy d)
     let act =
         match props.name with
         | Some name ->
