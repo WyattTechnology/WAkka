@@ -518,6 +518,24 @@ module Actions =
                 | _ -> None
             Receive.Filter (filter, timeout, ?otherMsg = otherMsg)
 
+        /// Waits for a message of the given type that passes the given filter to be received. What to do with other
+        /// messages received while filtering is given by the otherMsg argument, it defaults to ignoreOthers.
+        static member FilterOnly<'Msg>(filter: 'Msg -> bool, ?otherMsg) : SimpleAction<'Msg> =
+            let filterType (msg: obj) =
+                match msg with
+                | :? 'Msg as m -> if filter m then Some m else None
+                | _ -> None
+            Receive.Filter (filterType, ?otherMsg = otherMsg)
+        /// Waits for a message of the given type that passes the given filter to be received. If the timeout is reached
+        /// before an appropriate message is received then None is returned. What to do with other messages received
+        /// while filtering is given by the otherMsg argument, it defaults to ignoreOthers.
+        static member FilterOnly<'Msg> (timeout: TimeSpan, filter: 'Msg -> bool, ?otherMsg) : SimpleAction<Option<'Msg>> =
+            let filterType (msg: obj) =
+                match msg with
+                | :? 'Msg as m -> if filter m then Some m else None
+                | _ -> None
+            Receive.Filter (filterType, timeout, ?otherMsg = otherMsg)
+    
     /// Gets the sender of the most recently received message.
     let getSender () = Simple (fun ctx -> Done (Akkling.ActorRefs.typed ctx.Sender))
 

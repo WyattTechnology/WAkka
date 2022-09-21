@@ -147,6 +147,27 @@ let ``receive only with stash strategy stashes other messages`` ([<ValueSource("
         probe.ExpectMsg otherMsg |> ignore
 
 [<Test>]
+let ``receive filter only uses the filter`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () =
+            actor {
+                let! msg = Receive.FilterOnly<Msg>(fun msg -> msg.value % 2 = 0)
+                do! ActorRefs.typed probe <! msg
+                return! handle ()
+            }
+        let act = spawn tk.Sys Props.Anonymous (makeActor <| handle ())
+
+        let otherMsg = "This should be ignored"
+        tell (retype act) otherMsg
+        let m0 = {value = 1}
+        tell (retype act) m0
+        let m1 = {value = 2}
+        tell (retype act) m1
+        probe.ExpectMsg m1 |> ignore        
+
+[<Test>]
 let ``receive any with timeout will timeout`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
