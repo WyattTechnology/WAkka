@@ -6,6 +6,7 @@ type GetInfo = GetInfo
 
 type TestMsg = {
     index: int
+    stop: Option<System.Threading.Tasks.TaskCompletionSource<unit>>
 }
 
 type Sender(recv: IActorRef<TestMsg>, numMessages: int) =
@@ -20,7 +21,7 @@ type Sender(recv: IActorRef<TestMsg>, numMessages: int) =
     
     do 
         for i in 1..numMessages do
-            recv <! {index = i}
+            recv <! {index = i; stop = None}
             
     let mutable nextIndex = 1
     
@@ -60,9 +61,11 @@ module WAkkaTest =
         spawn parent Props.Anonymous (notPersisted (
             let rec handle () = actor {
                 let! msg = Receive.Only<TestMsg>()
-                let! sender = getSender ()
-                do! sender <! msg
-                return! handle ()
+                if msg.stop.IsSome then
+                    msg.stop.Value.SetResult ()
+                    return ()
+                else 
+                    return! handle ()
             }
             handle ()
         ))
@@ -78,7 +81,9 @@ module AkkaTest =
             
             match msg with
             | :? TestMsg as testMsg -> 
-                typed ctx.Sender <! testMsg
+                if testMsg.stop.IsSome then
+                    testMsg.stop.Value.SetResult ()
+                    ctx.Stop ctx.Self                    
             | _ ->
                 ()
             
@@ -88,13 +93,32 @@ module AkkaTest =
 
 module AkklingTest =
     
+    // let makeActor parent = 
+    //         Spawn.spawnAnonymous parent (Props.props(fun ctx ->
+    //             let rec loop value (msg:TestMsg) = 
+    //                 if msg.stop.IsSome then
+    //                     msg.stop.Value.SetResult ()
+    //                     Spawn.stop ()                    
+    //                 else
+    //                     become (loop (value + 1))
+    //             become (loop 0)
+    //         ))
+            
     let makeActor parent = 
             Spawn.spawnAnonymous parent (Props.props(fun ctx ->
-                become (fun (msg:TestMsg) ->
-                    ctx.Sender () <! msg
-                    ignored ()
+                become (fun (msg:TestMsg) -> 
+                    if msg.stop.IsSome then
+                        msg.stop.Value.SetResult ()
+                        Spawn.stop ()                    
+                    else
+                        ignored ()
                 )
             ))
+            
+    let t = task {
+        let! x = task {return 5}
+        return 1 + x
+    }
             
 [<EntryPoint>]
 let main args =
@@ -108,20 +132,33 @@ let main args =
     let sys = System.create "perf-test" (Configuration.defaultConfig ())
 
     let runTest mode testActor =         
-        let actProps = Akka.Actor.Props.Create(fun () -> Sender(testActor, numMessages))
-        let monitor = sys.ActorOf(actProps)
-        let timeSpan : System.TimeSpan = typed monitor <? GetInfo |> Async.RunSynchronously
+        // let actProps = Akka.Actor.Props.Create(fun () -> Sender(testActor, numMessages))
+        // let monitor = sys.ActorOf(actProps)
+        // let timeSpan : System.TimeSpan = typed monitor <? GetInfo |> Async.RunSynchronously
+        let tcs = System.Threading.Tasks.TaskCompletionSource<unit>()
+        let msgs = [|
+            for i in 1..numMessages do
+                {index = i; stop = None}
+            {index = 0; stop = Some tcs}
+        |]
+        let start = System.DateTime.Now
+        for msg in msgs do
+            testActor <! msg
+        tcs.Task.Wait()
+        let timeSpan = System.DateTime.Now - start
         let rate = float numMessages/timeSpan.TotalSeconds
         printfn $"{mode}: {rate} msgs/sec"
         rate
     
-    while true do        
+    let mutable keepGoing = true
+    while keepGoing do        
         let akka = runTest "Akka" (AkkaTest.makeActor sys)
         let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
         let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
         let akklingDiff = akkling/akka * 100.0        
         let wakkaDiff = wakka/akka * 100.0        
         printfn $"Akkling: {akklingDiff}%%     WAkka: {wakkaDiff}%%"
+        keepGoing <- false
     0
     
     
