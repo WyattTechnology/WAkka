@@ -13,4 +13,8 @@
       <ProjectReference Include="..\WAkka\Wakka\WAkka.fsproj" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="BenchmarkDotNet" Version="0.13.5" />
+    </ItemGroup>
+
 </Project>
