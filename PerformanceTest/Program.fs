@@ -1,6 +1,7 @@
 ﻿module Main
 
 open Akkling
+open Microsoft.FSharp.Core
 
 type GetInfo = GetInfo
 
@@ -133,6 +134,28 @@ module AkklingWithStateTest =
                 become (loop 0)
             ))
             
+type Args =
+    | NoBenchmarks
+    | Tests of test:List<string> 
+    | NumMessages of int
+    with
+        interface Argu.IArgParserTemplate with
+            member this.Usage =
+                match this with
+                | NoBenchmarks -> "Run individual tests instead of the benchmark suite"
+                | Tests _ -> "List of tests to run when not running the benchmark suite ('all', 'akka', 'akkaWithState', 'akkling', 'akklingWithState', 'wakka')"
+                | NumMessages _ -> "Number of messages to us in each test"
+                
+let parser = Argu.ArgumentParser.Create<Args>()
+let args =
+    try 
+        parser.Parse (System.Environment.GetCommandLineArgs () |> Array.skip 1)
+    with
+    | :? Argu.ArguParseException as msg ->
+        printfn $"{msg.Message}"
+        System.Environment.Exit 1
+        Unchecked.defaultof<_>
+
 [<BenchmarkDotNet.Attributes.MemoryDiagnoser>]
 type ActorBenchmarks () =
     
@@ -185,49 +208,58 @@ type ActorBenchmarks () =
     member _.WAkka () =
         runTest wakkaActor
         
-[<EntryPoint>]
-let main _args =
+let runNonBenchmarkTests () = 
+    let numMessages = args.GetResult(Args.NumMessages, 10000)
+    let tests = args.GetResult(Args.Tests, ["all"])
     
+    let sys = System.create "perf-test" (Configuration.defaultConfig ())
+    
+    let runTest (mode: string) testActor =
+        if
+            tests |> List.contains (mode.ToLower())
+            || tests |> List.contains "all"
+        then 
+            let tcs = System.Threading.Tasks.TaskCompletionSource<unit>()
+            let msgs = [|
+                for i in 1..numMessages do
+                    {index = i; stop = None}
+                {index = 0; stop = Some tcs}
+            |]
+            let start = System.DateTime.Now
+            for msg in msgs do
+                testActor <! msg
+            tcs.Task.Wait()
+            let timeSpan = System.DateTime.Now - start
+            let rate = float numMessages/timeSpan.TotalSeconds
+            printfn $"{mode}: {rate} msgs/sec"
+            Some rate
+        else
+            None
+    
+    let akka = runTest "Akka" (AkkaTest.makeActor sys)
+    let akkaWithState = runTest "AkkaWithState" (AkkaWithStateTest.makeActor sys)
+    let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
+    let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
+    let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
+    akka |> Option.iter (fun akkaRate ->
+        let diff name rate = 
+            rate |> Option.iter (fun rate -> 
+                let akkaDiff = rate/akkaRate * 100.0
+                printfn $"{name}: {akkaDiff}%%"
+            )
+        diff "AkkaWithState" akkaWithState
+        diff "Akkling" akkling
+        diff "AkklingWithState" akklingWithState
+        diff "WAkka" wakka
+    )
+
+if args.Contains NoBenchmarks then
+    runNonBenchmarkTests ()
+else
     BenchmarkDotNet.Running.BenchmarkRunner.Run<ActorBenchmarks> () |> ignore    
         
-    // let numMessages =
-    //     args
-    //     |> Array.tryHead
-    //     |> Option.map int
-    //     |> Option.defaultValue 1000000
-    //
-    // let sys = System.create "perf-test" (Configuration.defaultConfig ())
-    //
-    // let runTest mode testActor =
-    //     // let actProps = Akka.Actor.Props.Create(fun () -> Sender(testActor, numMessages))
-    //     // let monitor = sys.ActorOf(actProps)
-    //     // let timeSpan : System.TimeSpan = typed monitor <? GetInfo |> Async.RunSynchronously
-    //     let tcs = System.Threading.Tasks.TaskCompletionSource<unit>()
-    //     let msgs = [|
-    //         for i in 1..numMessages do
-    //             {index = i; stop = None}
-    //         {index = 0; stop = Some tcs}
-    //     |]
-    //     let start = System.DateTime.Now
-    //     for msg in msgs do
-    //         testActor <! msg
-    //     tcs.Task.Wait()
-    //     let timeSpan = System.DateTime.Now - start
-    //     let rate = float numMessages/timeSpan.TotalSeconds
-    //     printfn $"{mode}: {rate} msgs/sec"
-    //     rate
-    //
-    // let mutable keepGoing = true
-    // while keepGoing do        
-    //     let akka = runTest "Akka" (AkkaTest.makeActor sys)
-    //     let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
-    //     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
-    //     let akklingDiff = akkling/akka * 100.0        
-    //     let wakkaDiff = wakka/akka * 100.0        
-    //     printfn $"Akkling: {akklingDiff}%%     WAkka: {wakkaDiff}%%"
-    //     keepGoing <- false
+System.Environment.Exit 0
 
-    0
     
     
     
