@@ -38,12 +38,16 @@ type SimpleType internal () = class end
 
 type SimpleExtra =
     private
-    | WaitForMsg
+    | WaitForMsg of (obj -> HandleMessagesResult<obj, obj>)
     | TryWith of (unit -> ActionBase<obj, SimpleExtra>) * (exn -> ActionBase<obj, SimpleExtra>)
     | TryFinally of (unit -> ActionBase<obj, SimpleExtra>) * (unit -> unit)
-
 /// An action that can only be used directly in a Simple actor (e.g. started using notPersistent or checkpointed).
-type SimpleAction<'Result> = ActionBase<'Result, SimpleExtra>
+and SimpleAction<'Result> = ActionBase<'Result, SimpleExtra>
+and HandleMessagesResult<'Msg, 'Result> =
+    | IsDone of 'Result
+    | Continue
+    | ContinueWith of ('Msg -> HandleMessagesResult<'Msg, 'Result>)
+    | ContinueWithAction of SimpleAction<'Result>
 
 let rec private bind (f: 'a -> SimpleAction<'b>) (op: SimpleAction<'a>) : SimpleAction<'b> =
     bindBase f op
@@ -106,7 +110,7 @@ module private SimpleActor =
         
         let logger = Logger ctx
 
-        let mutable msgHandler = fun msg ->
+        let mutable msgHandler = fun (msg: obj) ->
             logger.Error $"Received message before waitForStart installed: {msg}"
 
         let convertExnToResult func =
@@ -136,9 +140,8 @@ module private SimpleActor =
                 handleActions (next this)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg ->
-                    let cont = next >> handleActions
-                    msgHandler <- waitForMsg cont
+                | WaitForMsg handler ->
+                    msgHandler <- waitForMsg handler next handleActions
                 | TryWith(body, handler) ->
                     let cont res =
                         match res with
@@ -191,9 +194,9 @@ module private SimpleActor =
                     | Error err -> cont (Error err)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg ->
-                    let cont = next >> handleTryWith cont handler
-                    msgHandler <- waitForMsg cont
+                | WaitForMsg mh ->
+                    let handle = handleTryWith cont handler
+                    msgHandler <- waitForMsgWithRes mh next handle
                 | TryWith(body, newHandler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -240,9 +243,8 @@ module private SimpleActor =
                 | Error err -> cont (Error err)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg ->
-                    let cont = next >> handleException cont
-                    msgHandler <- waitForMsg cont
+                | WaitForMsg mh ->
+                    msgHandler <- waitForMsgWithRes mh next (handleException cont)
                 | TryWith(body, handler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -291,9 +293,8 @@ module private SimpleActor =
                     handleError err
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg ->
-                    let cont' = next >> handleTryFinally cont handler
-                    msgHandler <- waitForMsg cont'
+                | WaitForMsg mh ->
+                    msgHandler <- waitForMsgWithRes mh next (handleTryFinally cont handler)
                 | TryWith(body, newHandler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -315,11 +316,28 @@ module private SimpleActor =
                             cont' (Error err)
                         )
                         
-        and waitForMsg (handler: obj -> unit) (msg:obj) : unit =
+        and waitForMsg (handler: obj -> HandleMessagesResult<obj, obj>) (cont: obj -> SimpleAction<unit>) (actionHandler: SimpleAction<unit> -> unit) (msg: obj) =
             match msg with
             | :? Start -> ()
-            | _ -> handler msg
-
+            | _ ->
+                match handler msg with
+                | IsDone o -> cont o |> actionHandler
+                | Continue -> ()
+                | ContinueWith newHandler ->
+                    //TODO: make msgHandler an interface, implement WaitForMsg as class that can update handler in place
+                    msgHandler <- waitForMsg newHandler cont actionHandler
+                | ContinueWithAction action -> actionHandler (bind cont action)
+            
+        and waitForMsgWithRes (handler: obj -> HandleMessagesResult<obj, obj>) (cont: obj -> SimpleAction<obj>) (actionHandler: SimpleAction<obj> -> unit) (msg: obj) =
+            match msg with
+            | :? Start -> ()
+            | _ ->
+                match handler msg with
+                | IsDone o -> cont o |> actionHandler
+                | Continue -> ()
+                | ContinueWith newHandler -> msgHandler <- waitForMsgWithRes newHandler cont actionHandler
+                | ContinueWithAction action -> actionHandler (bind cont action)
+            
         let waitForStart (msg:obj) =
             match msg with
             | :? Start as start ->
@@ -329,7 +347,7 @@ module private SimpleActor =
                 | None ->
                     handleActions startAction
                 | Some cont ->
-                    msgHandler <- waitForMsg cont
+                    msgHandler <- cont
                 stash.UnstashAll ()
             | _ ->
                 stash.Stash ()
@@ -442,54 +460,76 @@ module Actions =
     }
 
     type Receive () =
-        static let nextMsg () : SimpleAction<obj> = Extra (WaitForMsg, Done)
-
+        static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
+            let rec wrap handler (msg: obj) =
+                match msg with
+                | :? 'Msg as msg ->
+                    match handler msg with
+                    | IsDone res -> IsDone (res :> obj)
+                    | Continue -> Continue
+                    | ContinueWith newHandler -> ContinueWith (wrap newHandler) 
+                    | ContinueWithAction actionBase -> ContinueWithAction (actionBase |> mapResult (fun res -> res :> obj))
+                | _ ->
+                    Continue
+            Extra(WaitForMsg (wrap handler), (fun res -> Done(res :?> 'Result)))
+        
+        static member HandleMessages (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) = handle handler 
+        
         /// Wait for a message for which the given function returns `Some`. What to do with other messages received
         /// while filtering is given by the otherMsg argument, it defaults to ignoreOthers.
         static member Filter (choose: obj -> Option<'Msg>, ?otherMsg) =
             let otherMsg = defaultArg otherMsg ignoreOthers
-            let rec recv () = actor {
-                match! nextMsg () with
+            let rec recv (msg: obj) =
+                match msg with
                 | :? Timeout ->
-                    return! recv ()
+                    Continue
                 | msg ->
                     match choose msg with
                     | Some res ->
-                        do! otherMsg.OnDone ()
-                        return res
+                        ContinueWithAction (actor {
+                            do! otherMsg.OnDone ()
+                            return res
+                        })
                     | None ->
-                        do! otherMsg.OtherMsg msg
-                        return! recv ()
-            }
-            recv ()
+                        ContinueWithAction (actor {
+                            do! otherMsg.OtherMsg msg
+                            return! handle recv
+                        })
+            handle recv
+            
         /// Wait for a message for which the given function returns `Some`. If the timeout is reached before an appropriate
         /// message is received then None is returned. What to do with other messages received while filtering is given
         /// by the otherMsg argument, it defaults to ignoreOthers.
         static member Filter (choose: obj -> Option<'Msg>, timeout: TimeSpan, ?otherMsg) =
             let otherMsg = defaultArg otherMsg ignoreOthers
-            let rec recv started (cancel: Akka.Actor.ICancelable) = actor {
-                match! nextMsg () with
+            let rec recv started (cancel: Akka.Actor.ICancelable) (msg: obj)= 
+                match msg with
                 | :? Timeout as timeout ->
                     if timeout.started = started then
-                        do! otherMsg.OnDone ()
-                        return None
+                        ContinueWithAction (actor{
+                            do! otherMsg.OnDone ()
+                            return None                            
+                        })
                     else
-                        return! recv started cancel
+                        Continue
                 | msg ->
                     match choose msg with
                     | Some res ->
                         cancel.Cancel()
-                        do! otherMsg.OnDone ()
-                        return (Some res)
+                        ContinueWithAction (actor{
+                            do! otherMsg.OnDone ()
+                            return (Some res)
+                        })
                     | None ->
-                        do! otherMsg.OtherMsg msg
-                        return! recv started cancel
-            }
+                        ContinueWithAction (actor{
+                            do! otherMsg.OtherMsg msg
+                            return! handle (recv started cancel)
+                        })
             actor {
                 let now = DateTime.Now
                 let! self = getActor ()
                 let! cancel = doSchedule timeout (Akkling.ActorRefs.retype self) {started = now}
-                return! recv now cancel
+                return! handle (recv now cancel)
             }
 
         /// Waits for any message to be received.
@@ -589,8 +629,8 @@ module Actions =
 let mapArray (func: 'a -> SimpleAction<'b>) (values: 'a []) : SimpleAction<'b []> =
     let rec loop (results: 'b []) i = actor {
         if i < values.Length then
-            let! res = func values.[i]
-            results.[i] <- res
+            let! res = func values[i]
+            results[i] <- res
             return! loop results (i + 1)
         else
             return results

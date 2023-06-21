@@ -425,6 +425,14 @@ let ``unwatch works`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction
         tell (retype watched) ""
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
+type HandleMessagesResult<'Msg, 'Result> =
+    | IsDone of 'Result
+    | Continue
+    | ContinueWith of ('Msg -> HandleMessagesResult<'Msg, 'Result>)
+    | ContinueWithAction of SimpleAction<'Result>
+    
+let handleMessages (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) = actor {return Unchecked.defaultof<'Result>}
+
 [<Test>]
 let ``termination wait works`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
     TestKit.testDefault <| fun tk ->
@@ -438,6 +446,36 @@ let ``termination wait works`` ([<ValueSource("actorFunctions")>] makeActor: Sim
         let start = actor {
             do! ActorRefs.typed probe <! ""
             do! Termination.Wait(watched, stashOthers)
+            
+            let makeHandler initState = 
+                let mutable state = initState
+                let rec handler msg =
+                    match msg with
+                    | Some value ->
+                        IsDone (value * state)
+                    | None ->
+                        state <- state + 1
+                        Continue
+                handler
+            let! res = handleMessages (makeHandler 0)
+            let rec handler state msg = 
+                match msg with
+                | Some value ->
+                    IsDone (value * state)
+                | None ->
+                    ContinueWith(handler (state + 1))
+            let! res = handleMessages (handler 0)
+            let! res = handleMessages (
+                let mutable state = 0
+                fun msg ->
+                    match msg with
+                    | Some value ->
+                        IsDone (value + state)
+                    | None ->
+                        state <- state + 1
+                        Continue                    
+            )
+            
             do! ActorRefs.typed probe <! (untyped watched)
         }
         let _act = spawn tk.Sys (Props.Named "test") (makeActor start)

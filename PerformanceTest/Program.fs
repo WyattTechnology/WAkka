@@ -67,6 +67,65 @@ module WAkkaTest =
             handle ()
         ))
 
+module WAkkaHandleTest =
+    open WAkka.Common
+    open WAkka.Spawn
+    open WAkka.Simple
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (notPersisted (
+            Receive.HandleMessages (fun (msg: obj) ->
+                match msg with
+                | :? TestMsg as testMsg -> 
+                    if testMsg.stop.IsSome then
+                        testMsg.stop.Value.SetResult ()
+                | _ ->
+                    ()
+                Continue
+            )
+        ))
+
+module WAkkaClosureTest =
+    open WAkka.Common
+    open WAkka.Spawn
+    open WAkka.Simple
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (notPersisted (
+            Receive.HandleMessages (
+                let rec handle state (msg: obj) =
+                    match msg with
+                    | :? TestMsg as testMsg -> 
+                        if testMsg.stop.IsSome then
+                            testMsg.stop.Value.SetResult ()
+                    | _ ->
+                        ()
+                    ContinueWith (handle (state + 1))
+                handle 0
+            )
+        ))
+
+module WAkkaMutableTest =
+    open WAkka.Common
+    open WAkka.Spawn
+    open WAkka.Simple
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (notPersisted (
+            Receive.HandleMessages (
+                let mutable state = 0
+                fun (msg: obj) ->
+                    match msg with
+                    | :? TestMsg as testMsg -> 
+                        if testMsg.stop.IsSome then
+                            testMsg.stop.Value.SetResult ()
+                    | _ ->
+                        ()
+                    state <- state + 1
+                    Continue
+            )
+        ))
+
 module AkkaTest =
     
     type TestActor() =
@@ -171,6 +230,9 @@ type ActorBenchmarks () =
     let mutable akklingActor = Unchecked.defaultof<_>
     let mutable akklingWithStateActor = Unchecked.defaultof<_>
     let mutable wakkaActor = Unchecked.defaultof<_>
+    let mutable wakkaHandleActor = Unchecked.defaultof<_>
+    let mutable wakkaClosureActor = Unchecked.defaultof<_>
+    let mutable wakkaMutableActor = Unchecked.defaultof<_>
     
     let runTest testActor =
         for msg in msgs do
@@ -187,6 +249,9 @@ type ActorBenchmarks () =
         akklingActor <- AkklingTest.makeActor sys
         akklingWithStateActor <- AkklingWithStateTest.makeActor sys
         wakkaActor <- WAkkaTest.makeActor sys
+        wakkaHandleActor <- WAkkaHandleTest.makeActor sys
+        wakkaClosureActor <- WAkkaClosureTest.makeActor sys
+        wakkaMutableActor <- WAkkaMutableTest.makeActor sys
         
     [<BenchmarkDotNet.Attributes.Benchmark(Baseline = true)>]
     member _.Akka () =
@@ -207,6 +272,18 @@ type ActorBenchmarks () =
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkka () =
         runTest wakkaActor
+    
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaHandle () =
+        runTest wakkaHandleActor
+    
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaClosure () =
+        runTest wakkaClosureActor
+    
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaMutable () =
+        runTest wakkaMutableActor    
         
 let runNonBenchmarkTests () = 
     let numMessages = args.GetResult(Args.NumMessages, 10000)
@@ -241,6 +318,10 @@ let runNonBenchmarkTests () =
     let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
     let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
+    let wakkaHandle = runTest "WAkkaHandle" (WAkkaHandleTest.makeActor sys)
+    let wakkaClosure = runTest "WAkkaClosure" (WAkkaClosureTest.makeActor sys)
+    let wakkaMutable = runTest "WAkkaMutable" (WAkkaMutableTest.makeActor sys)
+    
     akka |> Option.iter (fun akkaRate ->
         let diff name rate = 
             rate |> Option.iter (fun rate -> 
@@ -251,6 +332,9 @@ let runNonBenchmarkTests () =
         diff "Akkling" akkling
         diff "AkklingWithState" akklingWithState
         diff "WAkka" wakka
+        diff "WAkkaHandle" wakkaHandle
+        diff "WAkkaClosure" wakkaClosure
+        diff "WAkkaMutable" wakkaMutable
     )
 
 if args.Contains NoBenchmarks then
