@@ -19,6 +19,7 @@
     <Description>Make creating certain types of Akka.NET actors easier in F#.</Description>
     <Copyright>Copyright (c) Wyatt Technology 2022</Copyright>
     <PackageTags>actors,Akka, akka,concurreny,akka.net,fsharp</PackageTags>
+    <LangVersion>7.0</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
