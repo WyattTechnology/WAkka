@@ -501,13 +501,6 @@ module Actions =
     /// This interface is mostly meant to be used by actors that are entirely contained within a Receive.HandleMessages
     /// action.
     let getContext () : SimpleAction<IContext> = Simple(fun ctx -> Done (Context ctx :> IContext))
-    /// Runs an action, passing it the context. Note that all functionality in IContext is also available via individual
-    /// actions. This interface is mostly meant to be used by actors that are entirely contained within a
-    /// Receive.HandleMessages action.
-    let withContext f = actor {
-        let! ctx = getContext()
-        return! f ctx
-    }
 
     /// Stashes the most recently received message.
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
