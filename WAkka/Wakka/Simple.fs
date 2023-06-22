@@ -49,11 +49,6 @@ and private IMessageHandlerFactory =
     abstract member CreateUnit : (obj -> SimpleAction<unit>) * (SimpleAction<unit> -> unit) -> IMessageHandler
 and private IMessageHandler =
     abstract member HandleMessage : obj -> unit    
-and HandleMessagesResult<'Msg, 'Result> =
-    | IsDone of 'Result
-    | Continue
-    | ContinueWith of ('Msg -> HandleMessagesResult<'Msg, 'Result>)
-    | ContinueWithAction of SimpleAction<'Result>
 
 let rec private bind (f: 'a -> SimpleAction<'b>) (op: SimpleAction<'a>) : SimpleAction<'b> =
     bindBase f op
@@ -420,6 +415,100 @@ module Actions =
 
     type private Timeout = {started: DateTime}
 
+    /// The actor context. Note that all functionality in this interface is also available via individual actions.
+    /// This interface is mostly meant to be used by actors that are entirely contained within a Receive.HandleMessages
+    /// action.
+    type IContext =
+        /// Gets a reference to this actor.
+        abstract member GetSelf: unit -> Akkling.ActorRefs.IActorRef<_>
+        /// Gets the actor factory to use when starting children of this actor.
+        abstract member ActorFactory: Akka.Actor.IActorRefFactory
+        /// Gets the actor's logger.
+        abstract member Logger: Logger
+        
+        /// Gets the sender of the current message.
+        abstract member GetSender: unit -> Akkling.ActorRefs.IActorRef<_>
+        /// Stashes the current message.
+        abstract member Stash: unit -> unit
+        /// Unstashes one message.
+        abstract member Unstash: unit -> unit
+        /// Unstashes all stashed messages.
+        abstract member UnstashAll: unit -> unit
+
+        /// Watches the given actor for termination.
+        abstract member Watch: Akka.Actor.IActorRef -> unit
+        /// Watches the given actor for termination.
+        abstract member Watch: Akkling.ActorRefs.IActorRef<_> -> unit
+        /// Stops watching the given actor for termination.
+        abstract member Unwatch: Akka.Actor.IActorRef -> unit
+        /// Stops watching the given actor for termination.
+        abstract member Unwatch: Akkling.ActorRefs.IActorRef<_> -> unit
+
+        /// Schedules the given message to be sent to the given actor after the given delay. The returned object can be used
+        /// to cancel the sending of the message.
+        abstract member Schedule: TimeSpan * 'Msg * Akkling.ActorRefs.IActorRef<'Msg> -> Akka.Actor.ICancelable
+        /// Schedules the given message to be sent to the given actor after the given delay. After the first send, the message
+        /// will be sent repeatedly with the given interval between sends. The returned object can be used to cancel the sending
+        /// of the message.
+        abstract member ScheduleRepeatedly: TimeSpan * TimeSpan * 'Msg * Akkling.ActorRefs.IActorRef<'Msg> -> Akka.Actor.ICancelable
+        
+        /// Get an actor selection for the given actor path.
+        abstract member Select: string -> Akka.Actor.ActorSelection
+        /// Get an actor selection for the given actor path.
+        abstract member Select: Akka.Actor.ActorPath -> Akka.Actor.ActorSelection
+
+        /// Add a function to call if the actor restarts. The function is passed the actor context, the message that was
+        /// being processed when the crash happened, and the exception that caused the crash. This action returns an ID
+        /// that can be used to remove the handler via the ClearRestartHandler action.
+        abstract member SetRestartHandler: RestartHandler -> int
+        /// Clears the restart handler for the given index.
+        abstract member ClearRestartHandler: int -> unit
+        /// Add a function to call when the actor stops. The function is passed the actor context. This action returns an ID
+        /// that can be used to remove the handler via the ClearStopHandler action.
+        abstract member SetStopHandler: StopHandler -> int
+        /// Clears the restart handler for the given index.
+        abstract member ClearStopHandler: int -> unit
+
+    type private Context(ctx: IActionContext) =
+        interface IContext with
+            member _.GetSelf () = Akkling.ActorRefs.typed ctx.Self
+            member this.ActorFactory = ctx.ActorFactory
+            member this.Logger = ctx.Logger
+            member this.GetSender() = Akkling.ActorRefs.typed ctx.Sender
+            member this.Stash() = ctx.Stash.Stash()
+            member this.Unstash() = ctx.Stash.Unstash()
+            member this.UnstashAll() = ctx.Stash.UnstashAll()
+            member this.Unwatch (actor: Akka.Actor.IActorRef) = ctx.Unwatch actor
+            member this.Unwatch<'Msg> (actor: Akkling.ActorRefs.IActorRef<'Msg>) = ctx.Unwatch (Akkling.ActorRefs.untyped actor)
+            member this.Watch (actor: Akka.Actor.IActorRef) = ctx.Watch actor
+            member this.Watch<'Msg> (actor: Akkling.ActorRefs.IActorRef<'Msg>) = ctx.Watch (Akkling.ActorRefs.untyped actor)
+            member this.Schedule (delay, msg, receiver) =
+                let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
+                ctx.Scheduler.ScheduleTellOnce (delay, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
+                cancel :> Akka.Actor.ICancelable
+            member this.ScheduleRepeatedly (delay, interval, msg, receiver) =
+                let cancel = new Akka.Actor.Cancelable (ctx.Scheduler)
+                ctx.Scheduler.ScheduleTellRepeatedly (delay, interval, Akkling.ActorRefs.untyped receiver, msg, ctx.Self, cancel)
+                cancel :> Akka.Actor.ICancelable
+            member this.Select (path: string) = ctx.ActorSelection path
+            member this.Select (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
+            member this.SetRestartHandler handler = ctx.SetRestartHandler handler
+            member this.ClearRestartHandler index = ctx.ClearRestartHandler index
+            member this.SetStopHandler handler = ctx.SetStopHandler handler
+            member this.ClearStopHandler index = ctx.ClearStopHandler index
+            
+    /// Gets the actor context. Note that all functionality in IContext is also available via individual actions.
+    /// This interface is mostly meant to be used by actors that are entirely contained within a Receive.HandleMessages
+    /// action.
+    let getContext () : SimpleAction<IContext> = Simple(fun ctx -> Done (Context ctx :> IContext))
+    /// Runs an action, passing it the context. Note that all functionality in IContext is also available via individual
+    /// actions. This interface is mostly meant to be used by actors that are entirely contained within a
+    /// Receive.HandleMessages action.
+    let withContext f = actor {
+        let! ctx = getContext()
+        return! f ctx
+    }
+
     /// Stashes the most recently received message.
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
     /// Unstashes the message at the front of the stash.
@@ -445,6 +534,19 @@ module Actions =
             member _.OtherMsg _msg = actor.Return ()
             member _.OnDone () = actor.Return ()
     }
+    
+     /// The result of handling a message via Receive.HandleMessages.
+    type HandleMessagesResult<'Msg, 'Result> =
+        /// We are done handling messages with the given result. If HandleMessages was the only action in the actor then
+        /// the actor will stop, else the result given here will be the result of the HandleMessages action. 
+        | IsDone of 'Result
+        /// Continue processing messages using the current message handling function.
+        | Continue
+        /// Continue processing messages using the given message handling function.
+        | ContinueWith of ('Msg -> HandleMessagesResult<'Msg, 'Result>)
+        /// Continue the actor with the given action. The result of the action will become the result of the HandleMessages
+        /// action.
+        | ContinueWithAction of SimpleAction<'Result>
 
     type private MessageHandler<'Msg, 'Result, 'ContResult>(
         handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>,
@@ -479,7 +581,15 @@ module Actions =
         static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
             Extra(WaitForMsg (MessageHandlerFactory handler), (fun res -> Done(res :?> 'Result)))
         
+        /// Use the given function to handle messages. The result of the function determines how to proceed after a
+        /// message is received.
         static member HandleMessages (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) = handle handler 
+        /// Use the given function to handle messages. The result of the function determines how to proceed after a
+        /// message is received. The context for the actor is passed to the function as well.
+        static member HandleMessages (handler: IContext -> 'Msg -> HandleMessagesResult<'Msg, 'Result>) = actor {
+            let! ctx = getContext ()
+            return! handle (handler ctx) 
+        }
         
         /// Wait for a message for which the given function returns `Some`. What to do with other messages received
         /// while filtering is given by the otherMsg argument, it defaults to ignoreOthers.
