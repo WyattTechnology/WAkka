@@ -36,13 +36,19 @@ open Common
 
 type SimpleType internal () = class end
 
+
 type SimpleExtra =
     private
-    | WaitForMsg of (obj -> HandleMessagesResult<obj, obj>)
+    | WaitForMsg of IMessageHandlerFactory
     | TryWith of (unit -> ActionBase<obj, SimpleExtra>) * (exn -> ActionBase<obj, SimpleExtra>)
     | TryFinally of (unit -> ActionBase<obj, SimpleExtra>) * (unit -> unit)
 /// An action that can only be used directly in a Simple actor (e.g. started using notPersistent or checkpointed).
 and SimpleAction<'Result> = ActionBase<'Result, SimpleExtra>
+and private IMessageHandlerFactory =
+    abstract member CreateObj : (obj -> SimpleAction<obj>) * (SimpleAction<obj> -> unit) -> IMessageHandler
+    abstract member CreateUnit : (obj -> SimpleAction<unit>) * (SimpleAction<unit> -> unit) -> IMessageHandler
+and private IMessageHandler =
+    abstract member HandleMessage : obj -> unit    
 and HandleMessagesResult<'Msg, 'Result> =
     | IsDone of 'Result
     | Continue
@@ -93,7 +99,7 @@ let actor = ActorBuilder ()
 module private SimpleActor =
 
     type Start = {
-        checkpoint: Option<obj -> unit>
+        checkpoint: Option<IMessageHandler>
         restartHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>
         stopHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext>
     }
@@ -110,8 +116,11 @@ module private SimpleActor =
         
         let logger = Logger ctx
 
-        let mutable msgHandler = fun (msg: obj) ->
-            logger.Error $"Received message before waitForStart installed: {msg}"
+        let mutable msgHandler = {
+            new IMessageHandler with
+                member this.HandleMessage msg =
+                    logger.Error $"Received message before waitForStart installed: {msg}"
+        }
 
         let convertExnToResult func =
             try
@@ -140,8 +149,8 @@ module private SimpleActor =
                 handleActions (next this)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg handler ->
-                    msgHandler <- waitForMsg handler next handleActions
+                | WaitForMsg factory ->
+                    msgHandler <- factory.CreateUnit(next, handleActions)
                 | TryWith(body, handler) ->
                     let cont res =
                         match res with
@@ -194,9 +203,8 @@ module private SimpleActor =
                     | Error err -> cont (Error err)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg mh ->
-                    let handle = handleTryWith cont handler
-                    msgHandler <- waitForMsgWithRes mh next handle
+                | WaitForMsg factory ->
+                    msgHandler <- factory.CreateObj(next, handleTryWith cont handler)
                 | TryWith(body, newHandler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -243,8 +251,8 @@ module private SimpleActor =
                 | Error err -> cont (Error err)
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg mh ->
-                    msgHandler <- waitForMsgWithRes mh next (handleException cont)
+                | WaitForMsg factory ->
+                    msgHandler <- factory.CreateObj(next, handleException cont)
                 | TryWith(body, handler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -293,8 +301,8 @@ module private SimpleActor =
                     handleError err
             | Extra (extra, next) ->
                 match extra with
-                | WaitForMsg mh ->
-                    msgHandler <- waitForMsgWithRes mh next (handleTryFinally cont handler)
+                | WaitForMsg factory ->
+                    msgHandler <- factory.CreateObj(next, handleTryFinally cont handler)
                 | TryWith(body, newHandler) ->
                     let cont' = makeNewCont next
                     let handleErrorBeforeFirstAction err =
@@ -314,47 +322,26 @@ module private SimpleActor =
                         (fun err ->
                             runFinally newHandler
                             cont' (Error err)
-                        )
-                        
-        and waitForMsg (handler: obj -> HandleMessagesResult<obj, obj>) (cont: obj -> SimpleAction<unit>) (actionHandler: SimpleAction<unit> -> unit) (msg: obj) =
-            match msg with
-            | :? Start -> ()
-            | _ ->
-                match handler msg with
-                | IsDone o -> cont o |> actionHandler
-                | Continue -> ()
-                | ContinueWith newHandler ->
-                    //TODO: make msgHandler an interface, implement WaitForMsg as class that can update handler in place
-                    msgHandler <- waitForMsg newHandler cont actionHandler
-                | ContinueWithAction action -> actionHandler (bind cont action)
+                        )                        
             
-        and waitForMsgWithRes (handler: obj -> HandleMessagesResult<obj, obj>) (cont: obj -> SimpleAction<obj>) (actionHandler: SimpleAction<obj> -> unit) (msg: obj) =
-            match msg with
-            | :? Start -> ()
-            | _ ->
-                match handler msg with
-                | IsDone o -> cont o |> actionHandler
-                | Continue -> ()
-                | ContinueWith newHandler -> msgHandler <- waitForMsgWithRes newHandler cont actionHandler
-                | ContinueWithAction action -> actionHandler (bind cont action)
-            
-        let waitForStart (msg:obj) =
-            match msg with
-            | :? Start as start ->
-                restartHandlers <- start.restartHandlers
-                stopHandlers <- start.stopHandlers
-                match start.checkpoint with
-                | None ->
-                    handleActions startAction
-                | Some cont ->
-                    msgHandler <- cont
-                stash.UnstashAll ()
-            | _ ->
-                stash.Stash ()
+        do msgHandler <- {
+            new IMessageHandler with
+                member _.HandleMessage (msg: obj) =
+                    match msg with
+                    | :? Start as start ->
+                        restartHandlers <- start.restartHandlers
+                        stopHandlers <- start.stopHandlers
+                        match start.checkpoint with
+                        | None ->
+                            handleActions startAction
+                        | Some cont ->
+                            msgHandler <- cont
+                        stash.UnstashAll ()
+                    | _ ->
+                        stash.Stash ()
+        }
 
-        do msgHandler <- waitForStart
-
-        override _.OnReceive (msg: obj) = msgHandler msg
+        override _.OnReceive (msg: obj) = msgHandler.HandleMessage msg
 
         override _.PreRestart(err: exn, msg: obj) =
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -459,19 +446,38 @@ module Actions =
             member _.OnDone () = actor.Return ()
     }
 
-    type Receive () =
-        static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
-            let rec wrap handler (msg: obj) =
+    type private MessageHandler<'Msg, 'Result, 'ContResult>(
+        handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>,
+        cont: obj -> SimpleAction<'ContResult>,
+        actionHandler: SimpleAction<'ContResult> -> unit
+    ) =
+        
+        let mutable handle = handler
+
+        interface IMessageHandler with
+            member _.HandleMessage (msg: obj) =
                 match msg with
                 | :? 'Msg as msg ->
-                    match handler msg with
-                    | IsDone res -> IsDone (res :> obj)
-                    | Continue -> Continue
-                    | ContinueWith newHandler -> ContinueWith (wrap newHandler) 
-                    | ContinueWithAction actionBase -> ContinueWithAction (actionBase |> mapResult (fun res -> res :> obj))
+                    match handle msg with
+                    | IsDone res -> actionHandler (cont res)
+                    | Continue -> ()
+                    | ContinueWith newHandler -> handle <- newHandler
+                    | ContinueWithAction action -> actionHandler (bind cont action)
                 | _ ->
-                    Continue
-            Extra(WaitForMsg (wrap handler), (fun res -> Done(res :?> 'Result)))
+                    ()
+    
+    type private MessageHandlerFactory<'Msg, 'Result>(
+        handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>
+    ) =
+        interface IMessageHandlerFactory with
+            member _.CreateObj(cont: obj -> SimpleAction<obj>, actionHandler: SimpleAction<obj> -> unit) =                
+                MessageHandler<'Msg, 'Result, obj>(handler, cont, actionHandler)
+            member _.CreateUnit(cont:obj -> SimpleAction<unit>, actionHandler: SimpleAction<unit> -> unit) = 
+                MessageHandler<'Msg, 'Result, unit>(handler, cont, actionHandler)
+            
+    type Receive () =
+        static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
+            Extra(WaitForMsg (MessageHandlerFactory handler), (fun res -> Done(res :?> 'Result)))
         
         static member HandleMessages (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) = handle handler 
         
