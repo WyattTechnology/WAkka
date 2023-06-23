@@ -193,6 +193,21 @@ module AkklingWithStateTest =
                 become (loop 0)
             ))
             
+module AkklingWithMutableStateTest =
+    
+    let makeActor parent = 
+            Spawn.spawnAnonymous parent (Props.props(fun _ctx ->
+                let mutable state = 0
+                let rec loop (msg:TestMsg) = 
+                    if msg.stop.IsSome then
+                        msg.stop.Value.SetResult ()
+                        state <- 0
+                    else
+                        state <- state + 1
+                    ignored()
+                become loop
+            ))
+            
 type Args =
     | NoBenchmarks
     | Tests of test:List<string> 
@@ -229,6 +244,7 @@ type ActorBenchmarks () =
     let mutable akkaWithStateActor = Unchecked.defaultof<_>
     let mutable akklingActor = Unchecked.defaultof<_>
     let mutable akklingWithStateActor = Unchecked.defaultof<_>
+    let mutable akklingWithMutableStateActor = Unchecked.defaultof<_>
     let mutable wakkaActor = Unchecked.defaultof<_>
     let mutable wakkaHandleActor = Unchecked.defaultof<_>
     let mutable wakkaClosureActor = Unchecked.defaultof<_>
@@ -248,6 +264,7 @@ type ActorBenchmarks () =
         akkaWithStateActor <- AkkaWithStateTest.makeActor sys
         akklingActor <- AkklingTest.makeActor sys
         akklingWithStateActor <- AkklingWithStateTest.makeActor sys
+        akklingWithMutableStateActor <- AkklingWithMutableStateTest.makeActor sys
         wakkaActor <- WAkkaTest.makeActor sys
         wakkaHandleActor <- WAkkaHandleTest.makeActor sys
         wakkaClosureActor <- WAkkaClosureTest.makeActor sys
@@ -267,8 +284,12 @@ type ActorBenchmarks () =
         
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.AkklingWithState () =
-        runTest akklingWithStateActor
-        
+        runTest akklingWithStateActor    
+    
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.AkklingWithMutableState () =
+        runTest akklingWithMutableStateActor    
+    
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkka () =
         runTest wakkaActor
@@ -317,6 +338,7 @@ let runNonBenchmarkTests () =
     let akkaWithState = runTest "AkkaWithState" (AkkaWithStateTest.makeActor sys)
     let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
     let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
+    let akklingWithMutableState = runTest "AkklingWithMutableState" (AkklingWithMutableStateTest.makeActor sys)
     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
     let wakkaHandle = runTest "WAkkaHandle" (WAkkaHandleTest.makeActor sys)
     let wakkaClosure = runTest "WAkkaClosure" (WAkkaClosureTest.makeActor sys)
@@ -331,6 +353,7 @@ let runNonBenchmarkTests () =
         diff "AkkaWithState" akkaWithState
         diff "Akkling" akkling
         diff "AkklingWithState" akklingWithState
+        diff "AkklingWithMutableState" akklingWithMutableState
         diff "WAkka" wakka
         diff "WAkkaHandle" wakkaHandle
         diff "WAkkaClosure" wakkaClosure
