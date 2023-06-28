@@ -31,6 +31,7 @@
     <Compile Include="Common.fs" />
     <Compile Include="LifeCycleHandlers.fs" />
     <Compile Include="Simple.fs" />
+    <Compile Include="SimpleSM.fs" />
     <Compile Include="ActorResult.fs" />
     <Compile Include="EventSourced.fs" />
     <Compile Include="Spawn.fs" />
@@ -39,7 +40,7 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Akkling" Version="0.12.0" />
     <PackageReference Include="Akkling.Persistence" Version="0.12.0" />
-    <PackageReference Update="FSharp.Core" Version="5.0.2" />
+    <PackageReference Update="FSharp.Core" Version="7.0.300" />
     <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
   </ItemGroup>
   <ItemGroup>

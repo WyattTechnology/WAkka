@@ -1362,3 +1362,127 @@ let ``stop handler is not invoked if handler is cleared`` ([<ValueSource("actorF
         res.id |> shouldEqual 2
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
+[<TestFixture>]
+module SmTests = 
+    
+    [<Test>]
+    let ``state machine actor`` () =
+        TestKit.testDefault <| fun tk ->
+            let probe = tk.CreateTestProbe "probe"
+            let trace = WAkka.SimpleSM.trace
+            try
+                trace "Test: starting actor"
+                let act = WAkka.SimpleSM.spawn tk Props.Anonymous (
+                    let rec loop i = WAkka.SimpleSM.smActor {
+                        trace $"CE: start loop {i}"
+                        let! msg = WAkka.SimpleSM.receive ()
+                        trace $"CE: git message {msg}"
+                        tell (typed probe) $"received {msg}"
+                        return! loop (i + 1)
+                    }
+                    WAkka.SimpleSM.smActor  {
+                        trace "CE: start"
+                        tell (typed probe) "start"
+                        return! loop 1
+                    }
+                )
+                probe.ExpectMsg<string> () |> shouldEqual "start"
+                trace "Test: sending hello"
+                tell (retype act) "hello"
+                probe.ExpectMsg<string> () |> shouldEqual "received hello"
+                trace "Test: sending hello2"
+                tell (retype act) "hello2"
+                probe.ExpectMsg<string> () |> shouldEqual "received hello2"
+                trace "Test: sending hello3"
+                tell (retype act) "hello3"
+                probe.ExpectMsg<string> () |> shouldEqual "received hello3"
+                trace "Test: sending hello4"
+                tell (retype act) "hello4"
+                probe.ExpectMsg<string> () |> shouldEqual "received hello4"
+            finally
+                for t in  WAkka.SimpleSM.getTraces() |> Seq.toList do 
+                    printfn $"{t}"
+        
+    [<Test>]
+    let ``state machine actor - no recursion`` () =
+        TestKit.testDefault <| fun tk ->
+            let probe = tk.CreateTestProbe "probe"
+            let act = WAkka.SimpleSM.spawn tk Props.Anonymous (
+                WAkka.SimpleSM.smActor  {
+                    let! msg1 = WAkka.SimpleSM.receive ()
+                    tell (typed probe) $"received {msg1}"
+                    let! msg2 = WAkka.SimpleSM.receive ()
+                    tell (typed probe) $"received {msg2}"
+                    let! msg3 = WAkka.SimpleSM.receive ()
+                    tell (typed probe) $"received {msg3}"
+                }
+            )
+            tk.Watch (untyped act) |> ignore
+            tell (retype act) "hello"
+            probe.ExpectMsg<string> () |> shouldEqual "received hello"
+            tell (retype act) "hello2"
+            probe.ExpectMsg<string> () |> shouldEqual "received hello2"
+            tell (retype act) "hello3"
+            probe.ExpectMsg<string> () |> shouldEqual "received hello3"
+            tk.ExpectTerminated (untyped act) |> ignore   
+        
+    [<Test>]
+    let ``state machine actor - bind action`` () =
+        TestKit.testDefault <| fun tk ->
+            let probe = tk.CreateTestProbe "probe"
+            WAkka.SimpleSM.clearTraces()
+            let trace = WAkka.SimpleSM.trace
+            try
+                trace "Test: starting actor"
+                let send recv msg =
+                    trace $"CE: Sending {msg} to {recv}"
+                    tell recv msg
+                let act = WAkka.SimpleSM.spawn tk Props.Anonymous (
+                    WAkka.SimpleSM.smActor {
+                        trace "CE: sending start"
+                        send (typed probe) "start"
+                        trace "CE: Starting let!"
+                        let resAct = WAkka.SimpleSM.smActor {
+                            trace "CE: Waiting for msg1"
+                            let! (msg1: string) = WAkka.SimpleSM.receive ()
+                            trace "CE: Waiting for msg2"
+                            let! (msg2: string) = WAkka.SimpleSM.receive ()
+                            trace "CE: returning"
+                            return msg1 + msg2        
+                        }
+                        let! res = resAct
+                        trace "CE: done"
+                        send (typed probe) $"received {res}"
+                    }
+                )
+                tk.Watch (untyped act) |> ignore
+                trace "Test: waiting for start"
+                probe.ExpectMsg<string> () |> shouldEqual "start"
+                trace "Test: sending msg1"
+                tell (retype act) "hello "
+                trace "Test: sending msg2"
+                tell (retype act) "there"
+                trace "Test: waiting for response"
+                probe.ExpectMsg<string> () |> shouldEqual "received hello there"
+                //probe.ExpectMsg<string> () |> shouldEqual "received hello "
+                tk.ExpectTerminated (untyped act) |> ignore   
+            finally
+                for t in  WAkka.SimpleSM.getTraces() |> Seq.toList do 
+                    printfn $"{t}"
+        
+        
+    [<Test>]
+    let ``state machine actor - mucho recurse`` () =
+        TestKit.testDefault <| fun tk ->
+            let probe = tk.CreateTestProbe "probe"
+            let act = WAkka.SimpleSM.spawn tk Props.Anonymous (
+                let rec loop i = WAkka.SimpleSM.smActor {
+                    let! msg = WAkka.SimpleSM.receive ()
+                    tell (typed probe) $"received {msg}"
+                    return! loop (i + 1)
+                }
+                loop 1
+            )
+            for i in 0 .. 100000 do
+                tell (retype act) $"hello {i}"
+                probe.ExpectMsg<string> () |> shouldEqual $"received hello {i}"
