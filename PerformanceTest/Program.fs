@@ -67,6 +67,21 @@ module WAkkaTest =
             handle ()
         ))
 
+module WAkkaSmTest =
+    open WAkka.Common
+    open WAkka.SimpleSM
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (
+            let rec handle () = smActor {
+                let! msg = receive()
+                if msg.stop.IsSome then
+                    msg.stop.Value.SetResult ()
+                return! handle ()
+            }
+            handle ()
+        )
+
 module AkkaTest =
     
     type TestActor() =
@@ -171,6 +186,7 @@ type ActorBenchmarks () =
     let mutable akklingActor = Unchecked.defaultof<_>
     let mutable akklingWithStateActor = Unchecked.defaultof<_>
     let mutable wakkaActor = Unchecked.defaultof<_>
+    let mutable wakkaSmActor = Unchecked.defaultof<_>
     
     let runTest testActor =
         for msg in msgs do
@@ -187,6 +203,7 @@ type ActorBenchmarks () =
         akklingActor <- AkklingTest.makeActor sys
         akklingWithStateActor <- AkklingWithStateTest.makeActor sys
         wakkaActor <- WAkkaTest.makeActor sys
+        wakkaSmActor <- WAkkaSmTest.makeActor sys
         
     [<BenchmarkDotNet.Attributes.Benchmark(Baseline = true)>]
     member _.Akka () =
@@ -207,6 +224,10 @@ type ActorBenchmarks () =
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkka () =
         runTest wakkaActor
+        
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaSm () =
+        runTest wakkaSmActor
         
 let runNonBenchmarkTests () = 
     let numMessages = args.GetResult(Args.NumMessages, 10000)
@@ -241,6 +262,7 @@ let runNonBenchmarkTests () =
     let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
     let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
+    let wakkaSm = runTest "WAkkaSm" (WAkkaSmTest.makeActor sys)
     akka |> Option.iter (fun akkaRate ->
         let diff name rate = 
             rate |> Option.iter (fun rate -> 
@@ -251,6 +273,7 @@ let runNonBenchmarkTests () =
         diff "Akkling" akkling
         diff "AkklingWithState" akklingWithState
         diff "WAkka" wakka
+        diff "WAkkaSm" wakkaSm
     )
 
 if args.Contains NoBenchmarks then
