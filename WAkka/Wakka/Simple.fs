@@ -81,6 +81,11 @@ type ActorBuilder () =
             bind next (f head)
         | None ->
             Done ()
+    member this.While(cond: unit -> bool, body: unit -> SimpleAction<unit>) : SimpleAction<unit> =
+        if cond () then
+            bind (fun () -> this.While (cond, body)) (body ()) 
+        else
+            Done ()
     member this.Using(disposable:#IDisposable, body) =
         let body' = fun () -> body disposable
         this.TryFinally(body', fun () ->

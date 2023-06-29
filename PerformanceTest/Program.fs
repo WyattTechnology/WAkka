@@ -9,48 +9,7 @@ type TestMsg = {
     index: int
     stop: Option<System.Threading.Tasks.TaskCompletionSource<unit>>
 }
-
-type Sender(recv: IActorRef<TestMsg>, numMessages: int) =
-    
-    inherit Akka.Actor.UntypedActor ()
-        
-    let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
-    let mutable stash = Unchecked.defaultof<Akka.Actor.IStash>
-
-    let start = System.DateTime.Now
-    let mutable finish = Unchecked.defaultof<System.DateTime>
-    
-    do 
-        for i in 1..numMessages do
-            recv <! {index = i; stop = None}
-            
-    let mutable nextIndex = 1
-    
-    override _.OnReceive (msg: obj) =
-        match msg with
-        | :? TestMsg as testMsg ->
-            if testMsg.index = nextIndex then
-                if nextIndex = numMessages then
-                    finish <- System.DateTime.Now
-                    nextIndex <- -1
-                else
-                    nextIndex <- nextIndex + 1
-                stash.UnstashAll ()
-            else
-                stash.Stash ()
-        | :? GetInfo ->
-            if nextIndex  = -1 then 
-                typed ctx.Sender <! (finish - start)
-            else
-                stash.Stash ()
-        | _ ->
-            ()
-    
-    interface Akka.Actor.IWithUnboundedStash with
-        member _.Stash
-            with get () = stash
-            and set newStash = stash <- newStash
-    
+   
 module WAkkaTest =
     open WAkka.Common
     open WAkka.Spawn
@@ -65,6 +24,23 @@ module WAkkaTest =
                 return! handle ()
             }
             handle ()
+        ))
+
+module WAkkaWhileTest =
+    open WAkka.Common
+    open WAkka.Spawn
+    open WAkka.Simple
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (notPersisted (
+            let mutable state = 0
+            actor {
+                while true do 
+                    let! msg = Receive.Only<TestMsg>()
+                    if msg.stop.IsSome then
+                        msg.stop.Value.SetResult ()
+                    state <- state + 1
+            }
         ))
 
 module WAkkaHandleTest =
@@ -247,6 +223,7 @@ type ActorBenchmarks () =
     let mutable akklingWithMutableStateActor = Unchecked.defaultof<_>
     let mutable wakkaActor = Unchecked.defaultof<_>
     let mutable wakkaHandleActor = Unchecked.defaultof<_>
+    let mutable wakkaWhileActor = Unchecked.defaultof<_>
     let mutable wakkaClosureActor = Unchecked.defaultof<_>
     let mutable wakkaMutableActor = Unchecked.defaultof<_>
     
@@ -266,6 +243,7 @@ type ActorBenchmarks () =
         akklingWithStateActor <- AkklingWithStateTest.makeActor sys
         akklingWithMutableStateActor <- AkklingWithMutableStateTest.makeActor sys
         wakkaActor <- WAkkaTest.makeActor sys
+        wakkaWhileActor <- WAkkaWhileTest.makeActor sys
         wakkaHandleActor <- WAkkaHandleTest.makeActor sys
         wakkaClosureActor <- WAkkaClosureTest.makeActor sys
         wakkaMutableActor <- WAkkaMutableTest.makeActor sys
@@ -293,6 +271,10 @@ type ActorBenchmarks () =
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkka () =
         runTest wakkaActor
+    
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaWhile () =
+        runTest wakkaWhileActor
     
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkkaHandle () =
@@ -340,6 +322,7 @@ let runNonBenchmarkTests () =
     let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
     let akklingWithMutableState = runTest "AkklingWithMutableState" (AkklingWithMutableStateTest.makeActor sys)
     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
+    let wakkaWhile = runTest "WAkkaWhile" (WAkkaWhileTest.makeActor sys)
     let wakkaHandle = runTest "WAkkaHandle" (WAkkaHandleTest.makeActor sys)
     let wakkaClosure = runTest "WAkkaClosure" (WAkkaClosureTest.makeActor sys)
     let wakkaMutable = runTest "WAkkaMutable" (WAkkaMutableTest.makeActor sys)
@@ -355,6 +338,7 @@ let runNonBenchmarkTests () =
         diff "AkklingWithState" akklingWithState
         diff "AkklingWithMutableState" akklingWithMutableState
         diff "WAkka" wakka
+        diff "WAkkaWhile" wakkaWhile
         diff "WAkkaHandle" wakkaHandle
         diff "WAkkaClosure" wakkaClosure
         diff "WAkkaMutable" wakkaMutable

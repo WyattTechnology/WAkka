@@ -1125,6 +1125,29 @@ let ``for loop runs expected number of times`` ([<ValueSource("actorFunctions")>
             probe.ExpectMsg $"{i}" |> ignore
         probe.ExpectMsg "done" |> ignore
 
+[<Test>]
+let ``while loop runs as long as expected`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+        let mutable keepGoing = 0
+        let mutable count = 0
+        let act = spawn tk.Sys (Props.Named "test") (makeActor (actor {
+             while keepGoing = 0 do
+                 let! msg = Receive.Only<string> ()
+                 System.Threading.Interlocked.Increment &count |> ignore
+                 do! typed probe <! $"Got {msg}"
+        }))
+        tk.Watch (untyped act) |> ignore
+        for i in 1..10 do
+            tellNow act $"{i}"
+            probe.ExpectMsg ($"Got {i}") |> ignore
+        
+        System.Threading.Interlocked.Increment &keepGoing |> ignore
+        tellNow act "stop"
+        probe.ExpectMsg ("Got stop") |> ignore
+        count |> shouldEqual 11
+        tk.ExpectTerminated (untyped act) |> ignore
+
 type WhileMsg =
     | WhileValue of int
     | WhileDone
