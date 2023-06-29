@@ -1,3 +1,14 @@
+// This is a test of a resumable code state machine implementation for the actor computation expression. It works
+// well enough to run benchmarks against the continuation based implementation. Unfortunately, the tail recursive
+// return! ends up being really costly as the state machine is created anew for each tail call and we have to do checks
+// for it on every call to move next. It ends up being having about the same performance as the continuation based
+// implementation.
+
+// Also added a while loop to the continuation implementation to try using a while loop with mutable state to build the
+// actor. This ends up doing worse than using return!.
+
+//CAUTION: multiple levels of binds are broken (see `WAkkaTests.SimpleTests.SmTests.state machine actor - bind action`)
+
 module WAkka.SimpleSM
 
 open System.Runtime.CompilerServices
