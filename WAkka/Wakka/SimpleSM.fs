@@ -31,10 +31,8 @@ type SmActor<'Result>() =
     abstract IsCompleted: bool
 
     /// Executes the SmActor until the next 'yield'
-    abstract MoveNext: unit -> unit
+    abstract ProcessMsg: obj -> unit
 
-    abstract SetNextMessage: obj -> unit
-    
     abstract SetResult: 'Result -> unit
     abstract Result: 'Result
     
@@ -65,29 +63,24 @@ and [<NoEquality; NoComparison>]
             //if enableTrace then trace $"SmActor({this}).IsCompleted: have tail-call"
             tg.IsCompleted
 
-    override this.SetNextMessage msg =
-        //if enableTrace then trace $"SmActor({this}).SetNextMessage: {msg}"
-        SmActorStateMachineData<'Result>.SetMessage(&this.Machine, msg)
-
     override this.TailCallTarget = 
         SmActorStateMachineData<'Result>.GetHijackTarget(&this.Machine)
 
-    override this.MoveNext() =
+    override this.ProcessMsg msg =
         match this.TailCallTarget with 
         | None ->
             //if enableTrace then trace $"SmActor({this}).MoveNext: no tail-call"
+            SmActorStateMachineData<'Result>.SetMessage(&this.Machine, msg)
             MoveNext(&this.Machine)
         | Some tg -> 
             //if enableTrace then trace $"SmActor({this}).MoveNext: have tail-call"
             match tg.TailCallTarget with 
             | None ->
-                tg.SetNextMessage this.Machine.Data.Message
-                tg.MoveNext()
+                tg.ProcessMsg msg
             | Some tg2 -> 
                 // Cut out chains of tail-calls
                 SmActorStateMachineData<'Result>.SetHijackTarget(&this.Machine, tg2)
-                tg2.SetNextMessage this.Machine.Data.Message
-                tg2.MoveNext()
+                tg2.ProcessMsg msg
     
     override this.SetResult result =
         //if enableTrace then trace $"SmActor({this}).SetResult: {result}"
@@ -162,8 +155,7 @@ type SmActorBuilder() =
                             // Goto request
                             match sm.Data.TailCallTarget with 
                             | Some tg ->
-                                tg.SetNextMessage sm.Data.Message
-                                tg.MoveNext() // recurse
+                                tg.ProcessMsg sm.Data.Message
                             | None -> ()
                         //-- RESUMABLE CODE END
                     ))
@@ -233,9 +225,7 @@ type SmActorBuilder() =
         //if enableTrace then trace "SmActorBuilder.Bind"
         SmActorCode<'Result>(fun sm ->
             //if enableTrace then trace $"SmActorBuilder({sm}).Bind: enter, msg = {sm.Data.Message}"
-            action.SetNextMessage null
-            //if enableTrace then trace $"SmActorBuilder({sm}).Bind: before initial MoveNext"
-            action.MoveNext()
+            action.ProcessMsg null
             //if enableTrace then trace $"SmActorBuilder({sm}).Bind: after initial MoveNext"
             let mutable __stack_fin = true
             if not action.IsCompleted then
@@ -245,8 +235,7 @@ type SmActorBuilder() =
                 
             if __stack_fin then
                 //if enableTrace then trace $"SmActorBuilder({sm}).Bind: after yield check, fin = true"
-                action.SetNextMessage sm.Data.Message
-                action.MoveNext ()
+                action.ProcessMsg sm.Data.Message
                 if action.IsCompleted then
                     //if enableTrace then trace $"SmActorBuilder({sm}).Bind: after action check, completed, result = {action.Result}"
                     (cont action.Result).Invoke(&sm)
@@ -294,7 +283,7 @@ type SmActorImpl (action: SmActor<unit>) =
     
     do
         //if enableTrace then trace "SmActorImpl.ctor"
-        action.MoveNext()
+        action.ProcessMsg()
         //if enableTrace then trace "SmActorImpl.ctor: after MoveNext"
         if action.IsCompleted then
             //if enableTrace then trace "SmActorImpl.ctor: completed"
@@ -302,9 +291,7 @@ type SmActorImpl (action: SmActor<unit>) =
     
     override this.OnReceive msg =
         //if enableTrace then trace $"SmActorImpl.OnReceive: {msg}"
-        action.SetNextMessage msg
-        //if enableTrace then trace "SmActorImpl.OnReceive: before MoveNext"
-        action.MoveNext()
+        action.ProcessMsg msg
         //if enableTrace then trace "SmActorImpl.OnReceive: after MoveNext"
         if action.IsCompleted then
             //if enableTrace then trace "SmActorImpl.OnReceive: completed"
