@@ -67,6 +67,23 @@ module WAkkaTest =
             handle ()
         ))
 
+module WAkkaWhileTest =
+    open WAkka.Common
+    open WAkka.Spawn
+    open WAkka.Simple
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (notPersisted (
+            let mutable state = 0
+            actor {
+                while true do
+                    let! msg = Receive.Only<TestMsg>()
+                    state <- state + 1
+                    if msg.stop.IsSome then
+                        msg.stop.Value.SetResult ()
+            }
+        ))
+
 module WAkkaSmTest =
     open WAkka.Common
     open WAkka.SimpleSM
@@ -186,6 +203,7 @@ type ActorBenchmarks () =
     let mutable akklingActor = Unchecked.defaultof<_>
     let mutable akklingWithStateActor = Unchecked.defaultof<_>
     let mutable wakkaActor = Unchecked.defaultof<_>
+    let mutable wakkaWhileActor = Unchecked.defaultof<_>
     let mutable wakkaSmActor = Unchecked.defaultof<_>
     
     let runTest testActor =
@@ -203,6 +221,7 @@ type ActorBenchmarks () =
         akklingActor <- AkklingTest.makeActor sys
         akklingWithStateActor <- AkklingWithStateTest.makeActor sys
         wakkaActor <- WAkkaTest.makeActor sys
+        wakkaWhileActor <- WAkkaWhileTest.makeActor sys
         wakkaSmActor <- WAkkaSmTest.makeActor sys
         
     [<BenchmarkDotNet.Attributes.Benchmark(Baseline = true)>]
@@ -224,6 +243,10 @@ type ActorBenchmarks () =
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkka () =
         runTest wakkaActor
+        
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaWhile () =
+        runTest wakkaWhileActor
         
     [<BenchmarkDotNet.Attributes.Benchmark>]
     member _.WAkkaSm () =
@@ -262,6 +285,7 @@ let runNonBenchmarkTests () =
     let akkling = runTest "Akkling" (AkklingTest.makeActor sys)
     let akklingWithState = runTest "AkklingWithState" (AkklingWithStateTest.makeActor sys)
     let wakka = runTest "WAkka" (WAkkaTest.makeActor sys)
+    let wakkaWhile = runTest "WAkkaWhile" (WAkkaWhileTest.makeActor sys)
     let wakkaSm = runTest "WAkkaSm" (WAkkaSmTest.makeActor sys)
     akka |> Option.iter (fun akkaRate ->
         let diff name rate = 
@@ -273,6 +297,7 @@ let runNonBenchmarkTests () =
         diff "Akkling" akkling
         diff "AkklingWithState" akklingWithState
         diff "WAkka" wakka
+        diff "WAkkaWhile" wakkaWhile
         diff "WAkkaSm" wakkaSm
     )
 

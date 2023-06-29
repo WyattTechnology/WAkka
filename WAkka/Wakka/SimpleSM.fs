@@ -139,9 +139,9 @@ type SmActorBuilder() =
 
     /// Create the state machine and outer execution logic
     member inline _.Run(code : SmActorCode<'Result>) : SmActor<'Result> = 
-        if __useResumableCode then 
+        if __useResumableCode then
             __stateMachine<SmActorStateMachineData<'Result>, SmActor<'Result>>
-    
+            
                 // IAsyncStateMachine.MoveNext
                 (MoveNextMethodImpl<_>(fun sm -> 
                         //-- RESUMABLE CODE START
@@ -159,10 +159,10 @@ type SmActorBuilder() =
                             | None -> ()
                         //-- RESUMABLE CODE END
                     ))
-    
+            
                 // IAsyncStateMachine.SetStateMachine
                 (SetStateMachineMethodImpl<_>(fun sm state -> SetStateMachine(&sm, state)))
-    
+            
                 // Box the SmActor.  In this example we don't start execution of the SmActor.
                 (AfterCode<_,_>(fun sm -> 
                     let mutable cr = SmActor<SmActorStateMachine<'Result>, 'Result>()
