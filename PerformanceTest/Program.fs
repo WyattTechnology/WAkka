@@ -136,6 +136,26 @@ module WAkkaMutableTest =
             )
         ))
 
+module WAkkaSmTest =
+    open WAkka.Common
+    open WAkka.SimpleSM
+
+    let makeActor parent =
+        spawn parent Props.Anonymous (
+            let rec handle () = smActor {
+                let! msg = receive()
+                if msg.stop.IsSome then
+                    msg.stop.Value.SetResult ()
+                return! handle ()
+            }
+            smActor {
+                let! msg = receive()
+                msg.ready.SetResult ()
+                msg.start.Task.Wait()
+                return! handle ()
+            }
+        )
+
 module AkkaTest =
     
     type TestActor() =
@@ -402,6 +422,15 @@ type ActorBenchmarks () =
     [<BenchmarkDotNet.Attributes.IterationSetup(Target = nameof Unchecked.defaultof<ActorBenchmarks>.WAkkaMutable)>]
     member _.WAkkaMutableSetup () =
         startStop <- prepTest (WAkkaMutableTest.makeActor sys)
+
+    [<BenchmarkDotNet.Attributes.Benchmark>]
+    member _.WAkkaSm () =
+        startStop.start.SetResult()
+        startStop.stop.Task.Wait()
+
+    [<BenchmarkDotNet.Attributes.IterationSetup(Target = nameof Unchecked.defaultof<ActorBenchmarks>.WAkkaSm)>]
+    member _.WAkkaSmSetup () =
+        startStop <- prepTest (WAkkaSmTest.makeActor sys)
         
 let runNonBenchmarkTests () = 
     let numMessages = args.GetResult(Args.NumMessages, 1000000)
@@ -446,6 +475,7 @@ let runNonBenchmarkTests () =
     let wakkaHandle = runTest "WAkkaHandle" (WAkkaHandleTest.makeActor sys)
     let wakkaClosure = runTest "WAkkaClosure" (WAkkaClosureTest.makeActor sys)
     let wakkaMutable = runTest "WAkkaMutable" (WAkkaMutableTest.makeActor sys)
+    let wakkaSm = runTest "WAkkaSm" (WAkkaSmTest.makeActor sys)
     
     akka |> Option.iter (fun akkaRate ->
         let diff name rate = 
@@ -462,6 +492,7 @@ let runNonBenchmarkTests () =
         diff "WAkkaHandle" wakkaHandle
         diff "WAkkaClosure" wakkaClosure
         diff "WAkkaMutable" wakkaMutable
+        diff "WAkkaSm" wakkaSm
     )
 
 if args.Contains NoBenchmarks then
