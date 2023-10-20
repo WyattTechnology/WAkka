@@ -1521,3 +1521,52 @@ let ``HandleMessages gives correct result when used in actor expression`` ([<Val
         probe.ExpectMsg {i = i1 + i2}  |> ignore
 
         tk.ExpectTerminated (untyped actor) |> ignore
+
+
+let testAction recv = actor{
+    let! m1 = Receive.Only<TestMsg>()
+    let! m2 = Receive.Only<TestMsg>()
+    do! recv <! {i = m1.i + m2.i}
+}
+
+type NotPersistedTestActor(recv: IActorRef<TestMsg>) =
+    inherit NotPersistedActor(testAction recv)
+    
+[<Test>]
+let ``NotPersistedActor class`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+        let recv : IActorRef<TestMsg> = typed probe
+
+        let props = Akka.Actor.Props.Create<NotPersistedTestActor> recv
+        let act = tk.ActorOf props
+        tk.Watch act |> ignore
+        
+        let i1 = 12
+        tell (typed act) {i = i1}
+        let i2 = 13
+        tell (typed act) {i = i2}
+        probe.ExpectMsg {i = i1 + i2} |> ignore
+
+        tk.ExpectTerminated act |> ignore
+
+type CheckpointedTestActor(recv: IActorRef<TestMsg>) =
+    inherit CheckpointedActor(testAction recv)
+    
+[<Test>]
+let ``CheckpointedActor class`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+        let recv : IActorRef<TestMsg> = typed probe
+
+        let props = Akka.Actor.Props.Create<CheckpointedTestActor> recv
+        let act = tk.ActorOf props
+        tk.Watch act |> ignore
+        
+        let i1 = 12
+        tell (typed act) {i = i1}
+        let i2 = 13
+        tell (typed act) {i = i2}
+        probe.ExpectMsg {i = i1 + i2} |> ignore
+
+        tk.ExpectTerminated act |> ignore

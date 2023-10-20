@@ -96,7 +96,7 @@ type ActorBuilder () =
 /// Builds a SimpleAction.
 let actor = ActorBuilder ()
 
-module private SimpleActor =
+module private SimpleActorPrivate =
 
     type Start = {
         checkpoint: Option<IMessageHandler>
@@ -104,298 +104,325 @@ module private SimpleActor =
         stopHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext>
     }
 
-    type Actor (persist: bool, startAction: SimpleAction<unit>) as this =
+/// <summary>
+/// The actor class used when spawning an actor of notPersisted or checkpointed type.
+/// This class is not meant to be used directly, instead use Spawn.spawn, or derive a new class from NotPersistedActor or CheckpointedActor.
+/// </summary>
+type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
 
-        inherit Akka.Actor.UntypedActor ()
+    inherit Akka.Actor.UntypedActor ()
 
-        let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
-        let mutable stash = Unchecked.defaultof<Akka.Actor.IStash>
-
-        let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
-        let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
-        
-        let logger = Logger ctx
-
-        let mutable msgHandler = {
-            new IMessageHandler with
-                member this.HandleMessage msg =
-                    logger.Error $"Received message before waitForStart installed: {msg}"
+    let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
+    do
+        let start : SimpleActorPrivate.Start = {
+            checkpoint = None
+            restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+            stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
         }
+        ctx.Self.Tell(start, ctx.Self)
+        
+    let mutable stash = Unchecked.defaultof<Akka.Actor.IStash>
 
-        let convertExnToResult func =
-            try
-                Ok (func ())
-            with
-            | err -> Error err
-        let tryNextAction body okHandler errorHandler =
-            match convertExnToResult body with
-            | Ok action ->
-                okHandler action
-            | Error err ->
-                errorHandler err
-        let runFinally handler =
-            try
-                handler ()
-            with
-            | err ->
-                logger.Error $"Got exception when running finally handler: {err}"
+    let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+    let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+    
+    let logger = Logger ctx
 
-        let rec handleActions (action: SimpleAction<unit>) =
-            match action with
-            | Done _
-            | Stop _ ->
-                ctx.Stop ctx.Self
-            | Simple next ->
-                handleActions (next this)
-            | Extra (extra, next) ->
-                match extra with
-                | WaitForMsg factory ->
-                    msgHandler <- factory.CreateUnit(next, handleActions)
-                | TryWith(body, handler) ->
-                    let cont res =
-                        match res with
-                        | Ok result -> result |> next |> handleActions
-                        | Error err -> handleException (next >> handleActions) (handler err)
-                    let handleErrorBeforeFirstAction err =
-                        tryNextAction
-                            (fun () -> handler err)
-                            (handleException cont)
-                            raise
+    let mutable msgHandler = {
+        new IMessageHandler with
+            member this.HandleMessage msg =
+                logger.Error $"Received message before waitForStart installed: {msg}"
+    }
+
+    let convertExnToResult func =
+        try
+            Ok (func ())
+        with
+        | err -> Error err
+    let tryNextAction body okHandler errorHandler =
+        match convertExnToResult body with
+        | Ok action ->
+            okHandler action
+        | Error err ->
+            errorHandler err
+    let runFinally handler =
+        try
+            handler ()
+        with
+        | err ->
+            logger.Error $"Got exception when running finally handler: {err}"
+
+    let rec handleActions (action: SimpleAction<unit>) =
+        match action with
+        | Done _
+        | Stop _ ->
+            ctx.Stop ctx.Self
+        | Simple next ->
+            handleActions (next this)
+        | Extra (extra, next) ->
+            match extra with
+            | WaitForMsg factory ->
+                msgHandler <- factory.CreateUnit(next, handleActions)
+            | TryWith(body, handler) ->
+                let cont res =
+                    match res with
+                    | Ok result -> result |> next |> handleActions
+                    | Error err -> handleException (next >> handleActions) (handler err)
+                let handleErrorBeforeFirstAction err =
                     tryNextAction
-                        body
-                        (handleTryWith cont handler)
-                        handleErrorBeforeFirstAction
-                | TryFinally (body, handler) ->
-                    let cont res =
-                        match res with
-                        | Ok result ->
-                            result |> next |> handleActions
-                        | Error err ->
-                            raise err
-                    let handleErrorBeforeFirstAction err =
-                        runFinally handler
+                        (fun () -> handler err)
+                        (handleException cont)
+                        raise
+                tryNextAction
+                    body
+                    (handleTryWith cont handler)
+                    handleErrorBeforeFirstAction
+            | TryFinally (body, handler) ->
+                let cont res =
+                    match res with
+                    | Ok result ->
+                        result |> next |> handleActions
+                    | Error err ->
                         raise err
-                    tryNextAction
-                        body
-                        (handleTryFinally cont handler)
-                        handleErrorBeforeFirstAction
+                let handleErrorBeforeFirstAction err =
+                    runFinally handler
+                    raise err
+                tryNextAction
+                    body
+                    (handleTryFinally cont handler)
+                    handleErrorBeforeFirstAction
 
-        and handleTryWith (cont: TryWithResult -> unit) (handler: exn -> SimpleAction<obj>) (action: SimpleAction<obj>) =
-            let makeNewCont next res =
-                match res with
-                | Ok result ->
-                    match convertExnToResult (fun () -> next result) with
-                    | Ok action -> handleTryWith cont handler action
-                    | Error err -> handleException cont (handler err)
-                | Error err ->
-                    handleException cont (handler err)
-            match action with
-            | Done result ->
-                cont (Ok result)
-            | Stop _ ->
-                ctx.Stop ctx.Self
-            | Simple next ->
-                match convertExnToResult (fun () -> next this) with
+    and handleTryWith (cont: TryWithResult -> unit) (handler: exn -> SimpleAction<obj>) (action: SimpleAction<obj>) =
+        let makeNewCont next res =
+            match res with
+            | Ok result ->
+                match convertExnToResult (fun () -> next result) with
                 | Ok action -> handleTryWith cont handler action
-                | Error err ->
-                    match convertExnToResult (fun () -> handler err) with
-                    | Ok action -> handleException cont action
-                    | Error err -> cont (Error err)
-            | Extra (extra, next) ->
-                match extra with
-                | WaitForMsg factory ->
-                    msgHandler <- factory.CreateObj(next, handleTryWith cont handler)
-                | TryWith(body, newHandler) ->
-                    let cont' = makeNewCont next
-                    let handleErrorBeforeFirstAction err =
-                        tryNextAction
-                            (fun () -> newHandler err)
-                            (handleException cont')
-                            (Error >> cont')
-                    tryNextAction
-                        body
-                        (handleTryWith cont' newHandler)
-                        handleErrorBeforeFirstAction
-                | TryFinally(body, newHandler) ->
-                    let cont' = makeNewCont next
-                    let handleError err =
-                        runFinally newHandler
-                        cont' (Error err)
-                    tryNextAction
-                        body
-                        (handleTryFinally cont' newHandler)
-                        handleError
-
-        and handleException (cont: TryWithResult -> unit) (action: SimpleAction<obj>) =
-            let makeNewCont next res =
-                match res with
-                | Ok result ->
-                    match convertExnToResult (fun () -> next result) with
-                    | Ok action -> handleException cont action
-                    | Error err -> cont (Error err)
-                | Error err ->
-                    cont (Error err)
-            match action with
-            | Done result ->
-                cont (Ok result)
-            | Stop _ ->
-                ctx.Stop ctx.Self
-            | Simple next ->
-                let nextRes =
-                    try
-                        Ok (next this)
-                    with
-                    | err -> Error err
-                match nextRes with
+                | Error err -> handleException cont (handler err)
+            | Error err ->
+                handleException cont (handler err)
+        match action with
+        | Done result ->
+            cont (Ok result)
+        | Stop _ ->
+            ctx.Stop ctx.Self
+        | Simple next ->
+            match convertExnToResult (fun () -> next this) with
+            | Ok action -> handleTryWith cont handler action
+            | Error err ->
+                match convertExnToResult (fun () -> handler err) with
                 | Ok action -> handleException cont action
                 | Error err -> cont (Error err)
-            | Extra (extra, next) ->
-                match extra with
-                | WaitForMsg factory ->
-                    msgHandler <- factory.CreateObj(next, handleException cont)
-                | TryWith(body, handler) ->
-                    let cont' = makeNewCont next
-                    let handleErrorBeforeFirstAction err =
-                        tryNextAction
-                            (fun () -> handler err)
-                            (handleException cont)
-                            (Error >> cont)
+        | Extra (extra, next) ->
+            match extra with
+            | WaitForMsg factory ->
+                msgHandler <- factory.CreateObj(next, handleTryWith cont handler)
+            | TryWith(body, newHandler) ->
+                let cont' = makeNewCont next
+                let handleErrorBeforeFirstAction err =
                     tryNextAction
-                        body
-                        (handleTryWith cont' handler)
-                        handleErrorBeforeFirstAction
-                | TryFinally(body, newHandler) ->
-                    let cont' = makeNewCont next
-                    let handleError err =
+                        (fun () -> newHandler err)
+                        (handleException cont')
+                        (Error >> cont')
+                tryNextAction
+                    body
+                    (handleTryWith cont' newHandler)
+                    handleErrorBeforeFirstAction
+            | TryFinally(body, newHandler) ->
+                let cont' = makeNewCont next
+                let handleError err =
+                    runFinally newHandler
+                    cont' (Error err)
+                tryNextAction
+                    body
+                    (handleTryFinally cont' newHandler)
+                    handleError
+
+    and handleException (cont: TryWithResult -> unit) (action: SimpleAction<obj>) =
+        let makeNewCont next res =
+            match res with
+            | Ok result ->
+                match convertExnToResult (fun () -> next result) with
+                | Ok action -> handleException cont action
+                | Error err -> cont (Error err)
+            | Error err ->
+                cont (Error err)
+        match action with
+        | Done result ->
+            cont (Ok result)
+        | Stop _ ->
+            ctx.Stop ctx.Self
+        | Simple next ->
+            let nextRes =
+                try
+                    Ok (next this)
+                with
+                | err -> Error err
+            match nextRes with
+            | Ok action -> handleException cont action
+            | Error err -> cont (Error err)
+        | Extra (extra, next) ->
+            match extra with
+            | WaitForMsg factory ->
+                msgHandler <- factory.CreateObj(next, handleException cont)
+            | TryWith(body, handler) ->
+                let cont' = makeNewCont next
+                let handleErrorBeforeFirstAction err =
+                    tryNextAction
+                        (fun () -> handler err)
+                        (handleException cont)
+                        (Error >> cont)
+                tryNextAction
+                    body
+                    (handleTryWith cont' handler)
+                    handleErrorBeforeFirstAction
+            | TryFinally(body, newHandler) ->
+                let cont' = makeNewCont next
+                let handleError err =
+                    runFinally newHandler
+                    cont' (Error err)
+                tryNextAction
+                    body
+                    (handleTryFinally cont' newHandler)
+                    handleError
+
+    and handleTryFinally (cont: TryWithResult -> unit) (handler: unit -> unit) (action: SimpleAction<obj>) =
+        let handleError err =
+            runFinally handler
+            cont (Error err)
+        let makeNewCont next res =
+            let res' = res |> Result.bind (fun result ->
+                convertExnToResult (fun () -> next result)
+            )
+            match res' with
+            | Ok action ->
+                handleTryFinally cont handler action
+            | Error err ->
+                handleError err
+        match action with
+        | Done result ->
+            runFinally handler
+            cont (Ok result)
+        | Stop _ ->
+            ctx.Stop ctx.Self
+        | Simple next ->
+            match convertExnToResult (fun () -> next this) with
+            | Ok action ->
+                handleTryFinally cont handler action
+            | Error err ->
+                handleError err
+        | Extra (extra, next) ->
+            match extra with
+            | WaitForMsg factory ->
+                msgHandler <- factory.CreateObj(next, handleTryFinally cont handler)
+            | TryWith(body, newHandler) ->
+                let cont' = makeNewCont next
+                let handleErrorBeforeFirstAction err =
+                    tryNextAction
+                        (fun () -> newHandler err)
+                        (handleException cont')
+                        (Error >> cont')
+                tryNextAction
+                    body
+                    (handleTryWith cont' newHandler)
+                    handleErrorBeforeFirstAction
+            | TryFinally(body, newHandler) ->
+                let cont' = makeNewCont next
+                tryNextAction
+                    body
+                    (handleTryFinally cont' newHandler)
+                    (fun err ->
                         runFinally newHandler
                         cont' (Error err)
-                    tryNextAction
-                        body
-                        (handleTryFinally cont' newHandler)
-                        handleError
-
-        and handleTryFinally (cont: TryWithResult -> unit) (handler: unit -> unit) (action: SimpleAction<obj>) =
-            let handleError err =
-                runFinally handler
-                cont (Error err)
-            let makeNewCont next res =
-                let res' = res |> Result.bind (fun result ->
-                    convertExnToResult (fun () -> next result)
-                )
-                match res' with
-                | Ok action ->
-                    handleTryFinally cont handler action
-                | Error err ->
-                    handleError err
-            match action with
-            | Done result ->
-                runFinally handler
-                cont (Ok result)
-            | Stop _ ->
-                ctx.Stop ctx.Self
-            | Simple next ->
-                match convertExnToResult (fun () -> next this) with
-                | Ok action ->
-                    handleTryFinally cont handler action
-                | Error err ->
-                    handleError err
-            | Extra (extra, next) ->
-                match extra with
-                | WaitForMsg factory ->
-                    msgHandler <- factory.CreateObj(next, handleTryFinally cont handler)
-                | TryWith(body, newHandler) ->
-                    let cont' = makeNewCont next
-                    let handleErrorBeforeFirstAction err =
-                        tryNextAction
-                            (fun () -> newHandler err)
-                            (handleException cont')
-                            (Error >> cont')
-                    tryNextAction
-                        body
-                        (handleTryWith cont' newHandler)
-                        handleErrorBeforeFirstAction
-                | TryFinally(body, newHandler) ->
-                    let cont' = makeNewCont next
-                    tryNextAction
-                        body
-                        (handleTryFinally cont' newHandler)
-                        (fun err ->
-                            runFinally newHandler
-                            cont' (Error err)
-                        )                        
-            
-        do msgHandler <- {
-            new IMessageHandler with
-                member _.HandleMessage (msg: obj) =
-                    match msg with
-                    | :? Start as start ->
-                        restartHandlers <- start.restartHandlers
-                        stopHandlers <- start.stopHandlers
-                        match start.checkpoint with
-                        | None ->
-                            handleActions startAction
-                        | Some cont ->
-                            msgHandler <- cont
-                        stash.UnstashAll ()
-                    | _ ->
-                        stash.Stash ()
-        }
-
-        override _.OnReceive (msg: obj) = msgHandler.HandleMessage msg
-
-        override _.PreRestart(err: exn, msg: obj) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
-            logger.Error $"Actor restarting after message {msg}: {err}"
-            restartHandlers.ExecuteHandlers (this :> IActorContext, msg, err)
-            let startMsg = 
-                if persist then
-                    {
-                        checkpoint = Some msgHandler
-                        restartHandlers = restartHandlers
-                        stopHandlers = stopHandlers
-                    }
-                else
-                    {
-                        checkpoint = None
-                        restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
-                        stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
-                    }
-            ctx.Self.Tell(startMsg, ctx.Self)
-            base.PreRestart (err, msg)
+                    )                        
         
-        override _.PostStop () =
-            stopHandlers.ExecuteHandlers (this :> IActorContext)
-            base.PostStop()
-            
-        interface IActionContext with
-            member _.Context = ctx
-            member _.Self = ctx.Self
-            member _.Logger = Logger ctx
-            member _.Sender = ctx.Sender
-            member _.Scheduler = ctx.System.Scheduler
-            member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
-            member _.Watch act = ctx.Watch act |> ignore
-            member _.Unwatch act = ctx.Unwatch act |> ignore
-            member _.ActorSelection (path: string) = ctx.ActorSelection path
-            member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
-            member _.Stash = stash
-            member _.SetRestartHandler handler = restartHandlers.AddHandler handler
-            member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
-            member this.SetStopHandler handler = stopHandlers.AddHandler handler
-            member this.ClearStopHandler id = stopHandlers.RemoveHandler id
+    do msgHandler <- {
+        new IMessageHandler with
+            member _.HandleMessage (msg: obj) =
+                match msg with
+                | :? SimpleActorPrivate.Start as start ->
+                    restartHandlers <- start.restartHandlers
+                    stopHandlers <- start.stopHandlers
+                    match start.checkpoint with
+                    | None ->
+                        handleActions startAction
+                    | Some cont ->
+                        msgHandler <- cont
+                    stash.UnstashAll ()
+                | _ ->
+                    stash.Stash ()
+    }
 
-        interface Akka.Actor.IWithUnboundedStash with
-            member _.Stash
-                with get () = stash
-                and set newStash = stash <- newStash
+    override _.OnReceive (msg: obj) = msgHandler.HandleMessage msg
 
+    override _.PreRestart(err: exn, msg: obj) =
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"Actor restarting after message {msg}: {err}"
+        restartHandlers.ExecuteHandlers (this :> IActorContext, msg, err)
+        let startMsg : SimpleActorPrivate.Start = 
+            if persist then
+                {
+                    checkpoint = Some msgHandler
+                    restartHandlers = restartHandlers
+                    stopHandlers = stopHandlers
+                }
+            else
+                {
+                    checkpoint = None
+                    restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+                    stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+                }
+        ctx.Self.Tell(startMsg, ctx.Self)
+        base.PreRestart (err, msg)
+    
+    override _.PostStop () =
+        stopHandlers.ExecuteHandlers (this :> IActorContext)
+        base.PostStop()
+        
+    interface IActionContext with
+        member _.Context = ctx
+        member _.Self = ctx.Self
+        member _.Logger = Logger ctx
+        member _.Sender = ctx.Sender
+        member _.Scheduler = ctx.System.Scheduler
+        member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
+        member _.Watch act = ctx.Watch act |> ignore
+        member _.Unwatch act = ctx.Unwatch act |> ignore
+        member _.ActorSelection (path: string) = ctx.ActorSelection path
+        member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
+        member _.Stash = stash
+        member _.SetRestartHandler handler = restartHandlers.AddHandler handler
+        member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
+        member this.SetStopHandler handler = stopHandlers.AddHandler handler
+        member this.ClearStopHandler id = stopHandlers.RemoveHandler id
+
+    interface Akka.Actor.IWithUnboundedStash with
+        member _.Stash
+            with get () = stash
+            and set newStash = stash <- newStash
+
+/// <summary>
+/// Class that can be used to spawn notPersisted actors. Usually, Spawn.spawn should be used to spawn actors, but if
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// can be derived from this class instead.  
+/// </summary>
+/// <param name="action">The action for the actor to run.</param>
+type NotPersistedActor(action: SimpleAction<unit>) = inherit SimpleActor(false, action)
+/// <summary>
+/// Class that can be used to spawn checkpointed actors. Usually, Spawn.spawn should be used to spawn actors, but if
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// can be derived from this class instead.
+/// </summary>
+/// <param name="action">The action for the actor to run.</param>
+type CheckpointedActor(action: SimpleAction<unit>) = inherit SimpleActor(true, action)
+    
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist: bool) (action: SimpleAction<unit>) =
     let applyMod arg modifier current =
         match arg with
         | Some a -> modifier a current
         | None -> current    
     let actProps =
-        Akka.Actor.Props.Create(fun () -> SimpleActor.Actor(persist, action))
+        Akka.Actor.Props.Create(fun () -> SimpleActor(persist, action))
         |> applyMod props.dispatcher (fun d a -> a.WithDispatcher d)
         |> applyMod props.deploy (fun d a -> a.WithDeploy d)
         |> applyMod props.mailbox (fun d a -> a.WithMailbox d)
@@ -407,12 +434,6 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist
             parent.ActorOf(actProps, name)
         | None ->
             parent.ActorOf(actProps)
-    let startMsg : SimpleActor.Start = {
-        checkpoint = None
-        restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
-        stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
-    }
-    act.Tell(startMsg, act)
     Akkling.ActorRefs.typed act
 
 [<AutoOpen>]
