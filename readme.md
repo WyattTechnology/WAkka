@@ -52,10 +52,10 @@ let printMsg =
 That's always a difficult question to answer in a general fashion for a library since every possible user of the library is working under different constraints. One question that will affect everyone: is it stable? As far as we can tell the answer is yes. The library has been through multiple iterations internally at Wyatt Technology in multiple products and appears to be solid. That being said, as with all open source software, no warranty is implied or given. 
 
 Note that the library has a few limitations:
-* Checkpointing is currently not supported for actors that use the Akka persistence system. You will see *checkpointed* actors below, but those actors use a different system to achieve persistence and are only persistent against actor crashes, not actor system crashes. 
+* Snapshotting is currently not supported for actors that use the Akka persistence system. 
 * Remote deployment of actors is currently not supported.
 
-Also, performance of actors built with WAkka lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the WAkka actor gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. This performance difference can probably be addressed, there just hasn't been any effort put into it yet.
+Also, performance of actors built with the `actor` computation expression (see [below](#actions)) lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the actor impplemented using the computation expression gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. If an actor is built using `HandleMessages`, then performance on par with Akkling can be achieved if `ContinueWith` is used for state management, and parity with Akka can be achieved if mutable state and `Continue` is used (see [below](#handlemessages)).  
 
 ## Usage
 
@@ -145,6 +145,7 @@ These actions can be used directly in both simple and event sourced actors.
 * `clearRestartHandler`: Clears any restart handler that was set using the `setRestartHandler` action.
 * `setStopHandler`: Sets a function to be called if the actor stops. The function will be passed the actor context. The action returns an ID that can be used to remove the handler via the `clearStopHandler` action. 
 * `clearStopHandler`: Clears any stop handler that was set using the `setStopHandler` action.
+* `getContext`: Gets an `IContext` object that allows access to the functionality of the above actions. This is mostly meant to be used with `HandleMessages` action (see [below](#handlemessages)).
 
 The `Common` module also contains functions to change the result type of an action:
 * `ignoreResult`: Ignore the result of a given action, makes things behave as though the result of the action is `unit`.
@@ -158,6 +159,7 @@ These actions can only be used directly in a simple actor (i.e. those started wi
   * `Any`: Receive the next message (no filtering).
   * `Filter`: Receive messages until one is received that satisfies the given filter.
   * `Only<'Type>`: Receives messages until one of type `'Type` is received.
+  * `HandleMessages`: Switches to processing messages with a message handling function, see [below](#handlemessages).
 * `getSender`: Gets the sender of the most recently received message.
 * `sleep`: Applies the given *other messages strategy* to any messages received for the given amount of time. 
 * `stash`: Stashes the most recently received message.
@@ -171,6 +173,76 @@ There are also functions for doing maps and folds of actions:
 * `foldActions`: takes an initial value of type `'res`, a sequence of actions of type `'a`, and function `'res -> 'a -> Action<'res>`. Creates an action that evaluates the first action from the sequence, passes its result and the initial value to the function and evaluates the resulting action. The result of this action becomes the `'res` value that is combined with the result of the next action from the sequence using the function. This continues until the sequence of actions is exhausted, at which point the final `'res` value is the result of the action.
 * `foldValues`: Works similar to `foldActions`, except that an sequence of values is passed in instead of an array of actions and the values in the sequence are used directly in when evaluating the function to generate sub-actions.
 * `executeWhile`: Executes a *condition* action, if it returns `Some` then the result is passed to the body function and the resulting action executed. Repeats until the condition action evaluates to `None`.
+
+#### HandleMessages
+
+Many actors just need to be able to handle a given message type in a loop, possibly updating some state. That can be accomplished using the `actor` computation expression:
+```f#
+let rec handle state = actor {
+    match! Receive.Any() with 
+    | :? Msg1 as msg -> 
+        return! handle {state with value1 = msg.value}
+    | :? Msg2 as msg -> 
+        return! handle {state with value2 = msg.value}
+    | _ ->
+        return! handle state
+}
+spawn parent Props.Anonymous (notPersistent (handle initState))
+```
+
+This pattern comes up enough that we provide a special action for it: `HandleMessages`, which takes a message handling function that will be called for each message received. The message handling function returns one of the cases of `HandleMessagesResult`:
+* `IsDone result`: Stops message handling and returns control to where `HandleMessages` was called, causing the `HandleMessages` action to evaluate to `result`. If this was a call to `spawn`, then the actor will exit.
+* `Continue`: Continue to process messages with the same message handler.
+* `ContinueWith handler`: Continue to process messages using the given handler.
+* `ContinueWithAction action`: Run the given action. When the action finishes, its result will be the result of the `HandleMessages` action.
+
+The above can be written as:
+```f#
+let rec handle state msg = 
+        match msg with
+        | :? Msg1 as msg -> 
+            HandleMessagesResult.ContinueWith (handle {state with value1 = msg.value})
+        | :? Msg2 as msg -> 
+            HandleMessagesResult.ContinueWith (handle {state with value2 = msg.value})
+        | _ ->
+            HandleMessagesResult.Continue
+    }
+}
+spawn parent Props.Anonymous (notPersistent (Receive.HandleMessages (handle initState)))
+```
+This isn't terribly different than the original code, but has a few advantages. The message handling is not inside of a computation expression, so if the need arises to run it under a debugger, you will have a much easier time. The second example will also execute faster since it bypasses all the computation expression machinery (and it's concomitant memory allocations). For most actors the computation expression is probably fast enough, but if you want parity with either Akkling or Akka then using `HandleMessages` is called for. In fact, once can attain parity with the Akka UntypedActor with mutable state by making a change to the above example:
+```f#
+let mutable state = initState
+let rec handle msg = 
+        match msg with
+        | :? Msg1 as msg -> 
+            state.value1 <- msg.value
+            HandleMessagesResult.Continue 
+        | :? Msg2 as msg -> 
+            state.value2 = msg.value
+            HandleMessagesResult.Continue 
+        | _ ->
+            HandleMessagesResult.Continue
+    }
+}
+spawn parent Props.Anonymous (notPersistent (Receive.HandleMessages handle))
+```
+
+This example will not allocate any memory in the course of processing messages. It sacrifices *functional purity* since it uses mutable state, but if you need the absolute best possible performance it's not uncommon to have to make that sacrifice on a small scale in order to get it. 
+
+Note that `HandleMessages` expects a function with signature `'Msg -> HandleMessagesResult<'Msg, 'Result>`. While the message handler is processing messages, any messages that are not of type `'Msg` will be ignored. If you want to receive all messages then your `'Msg` type must be `obj`. 
+
+`HandleMessages` can be mixed in with computation expression code as well. Since `HandleMessages` is an action, it can be called as 
+```f#
+actor {
+    let! result = Receive.HandleMessages handle
+    ... // Do stuff with result
+```
+In this code, the `handle` function will be called to handle each message that is received until it evaluates to `HandleMessagesResult.IsDone value`. `value` will then be the result of the `HandleMessages` action and `result` will be bound to it. One can also transition from a message handling function to a computation expression by having the message handling function evaluate to `HandleMessageResult.ContinueWithAction action` where `action` is the action that you want to execute. Note that if you want to go back to your message handling function at some point, then you will need to explicitly do a `return! Receive.HandleMessages handle` inside of your action (here `handle` is the message handling function to return to). 
+
+There is often a need to access the functionality that is contained in other action types when in the message handling function of `HandleMessages`. Unfortunately, actions cannot be used in the message handler, except by returning `ContinueWithAction` and the action then doing `return! HandleMessages ...`. This is very cumbersome. One option would to call the `getContext` action before calling `HandleMessages` and capture the `IContext` object in your message handler, then accessing the desired functionality through the captured object. This is a common enough pattern that there is a second version of `HandleMessages` that does it for you. Just pass a message handler with signature `IContext -> 'Msg -> HandleMessagesResult<'Msg, 'Result>` instead of `'Msg -> HandleMessagesResult<'Msg, 'Result>` and the context will be passed to your handler. 
+
+So when should you use the `actor` computation expression versus `HandleMessages`? If your actor does the same thing for every message that it receives then `HandleMessages` is probably the way to go. It's easier to trace through in the debugger and you'll get better performance (again, unless you're pushing the limits of processor power, the computation expression approach probably has plenty of performance for you). If you're running *workflow* style code then the computation expression is what you want since it is much more versatile. You can also mix them as we saw above. You could use `HandleMessages`, and when certain messages are received, use `ContinueWithAction` to launch into a workflow, returning to the original message handler via `return! HandleMessages ...` when the workflow is done. 
 
 #### Actor Result
 
@@ -196,7 +268,7 @@ The `ActorResult` module contains more functions to make working with this CE ea
 * `orElse`: Evaluates an action, then evaluates another action if the first action evaluates to `Error`. Designed to be chained using the `|>` operator: `action1 |> orElse action2 |> orElse action3...`.
 * `orElseWith`: Similar to `orElse`, but the action to evaluate in the error case is generated by a function that is passed the error value.
 * `ignore`: Ignores the `Ok` part fo a result converting it from `ActorResult<'a, 'e>` to `ActorResult<unit, 'e>`.
-* Many functions for converting other types, like booleans, `Option`, etc. to `ActorResult`. They all start with `require`.
+* `require*`: Many functions for converting other types, like booleans, `Option`, etc. to `ActorResult`. They all start with `require`.
 * `ofActor`: Runs the given actor action and wraps the result in `Ok`.
 * `ofResult`: Converts a `Result` to an `ActorResult` that evaluates to the original result.
 
