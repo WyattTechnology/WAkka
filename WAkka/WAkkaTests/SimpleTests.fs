@@ -1385,3 +1385,139 @@ let ``stop handler is not invoked if handler is cleared`` ([<ValueSource("actorF
         res.id |> shouldEqual 2
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
+[<Test>]
+let ``use HandleMessages at top-level`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let start = Receive.HandleMessages (fun msg ->
+            tell (typed probe) msg
+            HandleMessagesResult.IsDone ()
+        )
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor start)
+        tk.Watch (untyped actor) |> ignore
+        
+        tell (retype actor) "stop it"
+        probe.ExpectMsg "stop it" |> ignore
+        tk.ExpectTerminated (untyped actor) |> ignore
+
+[<Test>]
+let ``use HandleMessages with context at top-level`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let start = Receive.HandleMessages (fun ctx msg ->
+            tell (typed probe) $"act: {ctx.GetSelf()}"
+            tell (typed probe) msg
+            HandleMessagesResult.IsDone ()
+        )
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor start)
+        tk.Watch (untyped actor) |> ignore
+        
+        tell (retype actor) "stop it"
+        probe.ExpectMsg $"act: {actor}" |> ignore
+        probe.ExpectMsg "stop it" |> ignore
+        tk.ExpectTerminated (untyped actor) |> ignore
+
+[<Test>]
+let ``use HandleMessages, continue with no state changes`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let start = Receive.HandleMessages (fun msg ->
+            tell (typed probe) msg
+            HandleMessagesResult.Continue
+        )
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor start)
+
+        for i in 0 .. 10 do    
+            tell (retype actor) $"{i}"
+        for i in 0 .. 10 do           
+            probe.ExpectMsg $"{i}" |> ignore
+
+type TestMsg = {i: int}
+
+[<Test>]
+let ``use HandleMessages, continue with state changes`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle acc (msg: TestMsg) =
+            let newAcc = acc + msg.i
+            tell (typed probe) $"{msg.i}/{newAcc}"
+            HandleMessagesResult.ContinueWith (handle newAcc)
+            
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor (Receive.HandleMessages (handle 0)))
+
+        for i in 0 .. 10 do    
+            tell (retype actor) {i = i}
+        let mutable acc = 0
+        for i in 0 .. 10 do           
+            acc <- acc + i
+            probe.ExpectMsg $"{i}/{acc}" |> ignore
+
+[<Test>]
+let ``use HandleMessages, continue with action`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let handle (msg1: TestMsg) =
+            HandleMessagesResult.ContinueWithAction (actor {
+                let! msg2 = Receive.Only<TestMsg>()
+                do! typed probe <! {i = msg1.i + msg2.i}
+            }) 
+            
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor (Receive.HandleMessages handle))
+        tk.Watch (untyped actor) |> ignore
+
+        let i1 = 12
+        tell (retype actor) {i = i1}
+        let i2 = 13
+        tell (retype actor) {i = i2}
+        probe.ExpectMsg {i = i1 + i2}  |> ignore
+
+        tk.ExpectTerminated (untyped actor) |> ignore
+
+[<Test>]
+let ``HandleMessages ignores incorrect message type`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle acc (msg: TestMsg) =
+            let newAcc = acc + msg.i
+            tell (typed probe) $"{msg.i}/{newAcc}"
+            HandleMessagesResult.ContinueWith (handle newAcc)
+            
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor (Receive.HandleMessages (handle 0)))
+
+        for i in 0 .. 10 do    
+            tell (retype actor) {i = i}
+            tell (retype actor) "should be ignored"
+        let mutable acc = 0
+        for i in 0 .. 10 do           
+            acc <- acc + i
+            probe.ExpectMsg $"{i}/{acc}" |> ignore
+        
+[<Test>]
+let ``HandleMessages gives correct result when used in actor expression`` ([<ValueSource("actorFunctions")>] makeActor: SimpleAction<unit> -> ActorType) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle prevMsg (msg: TestMsg) =
+            match prevMsg with
+            | Some prev -> HandleMessagesResult.IsDone (prev.i + msg.i)
+            | None -> HandleMessagesResult.ContinueWith (handle (Some msg))
+            
+        let actor = spawn tk.Sys (Props.Named "stopper") (makeActor (actor {
+            let! res = Receive.HandleMessages (handle None)
+            do! typed probe <! {i = res}
+        }))
+        tk.Watch (untyped actor) |> ignore
+
+        let i1 = 12
+        tell (retype actor) {i = i1}
+        let i2 = 13
+        tell (retype actor) {i = i2}
+        probe.ExpectMsg {i = i1 + i2}  |> ignore
+
+        tk.ExpectTerminated (untyped actor) |> ignore
