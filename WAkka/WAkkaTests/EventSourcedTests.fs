@@ -646,24 +646,41 @@ let ``state is recovered after a crash with simple persist`` () =
 
 //TODO: Needs tests for persistence rejection and recovery failure
 
+let recoveryTestAction probe = actor {
+    let! res1 = isRecovering ()
+    if res1 then
+        do! probe <! "Was recovering at start"
+    let! recDone = persist(Simple.actor {return ()})
+    if recDone = RecoveryDone then
+        do! probe <! "Got RecoveryDone"
+    let! res2 = isRecovering ()
+    if not res2 then
+        do! probe <! "Was not recovering after RecoveryDone"
+}
+
 [<Test>]
 let ``isRecovering gives correct results`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
         
-        let action = actor {
-            let! res1 = isRecovering ()
-            if res1 then
-                do! (typed probe) <! "Was recovering at start"
-            let! recDone = persist(Simple.actor {return ()})
-            if recDone = RecoveryDone then
-                do! (typed probe) <! "Got RecoveryDone"
-            let! res2 = isRecovering ()
-            if not res2 then
-                do! (typed probe) <! "Was not recovering after RecoveryDone"
-        }
-        let _act = spawn tk.Sys (Props.Named "test") (eventSourced action)
+        let _act = spawn tk.Sys (Props.Named "test") (eventSourced (recoveryTestAction (typed probe)))
 
         probe.ExpectMsg "Was recovering at start" |> ignore
         probe.ExpectMsg "Got RecoveryDone" |> ignore
         probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
+
+type TestActorClass (recv: IActorRef<string>) = inherit EventSourcedActor (recoveryTestAction recv)
+
+[<Test>]
+let ``Actor class: isRecovering gives correct results`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+        let recv : IActorRef<string> = typed probe
+        
+        let props = Akka.Actor.Props.Create<TestActorClass> recv
+        let _act = tk.ActorOf props
+
+        probe.ExpectMsg "Was recovering at start" |> ignore
+        probe.ExpectMsg "Got RecoveryDone" |> ignore
+        probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
+    
