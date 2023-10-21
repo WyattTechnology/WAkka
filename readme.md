@@ -51,11 +51,9 @@ let printMsg =
 
 That's always a difficult question to answer in a general fashion for a library since every possible user of the library is working under different constraints. One question that will affect everyone: is it stable? As far as we can tell the answer is yes. The library has been through multiple iterations internally at Wyatt Technology in multiple products and appears to be solid. That being said, as with all open source software, no warranty is implied or given. 
 
-Note that the library has a few limitations:
-* Snapshotting is currently not supported for actors that use the Akka persistence system. 
-* Remote deployment of actors is currently not supported.
+Note that snapshotting is currently not supported for actors that use the Akka persistence system. 
 
-Also, performance of actors built with the `actor` computation expression (see [below](#actions)) lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the actor impplemented using the computation expression gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. If an actor is built using `HandleMessages`, then performance on par with Akkling can be achieved if `ContinueWith` is used for state management, and parity with Akka can be achieved if mutable state and `Continue` is used (see [below](#handlemessages)).  
+Performance of actors built with the `actor` computation expression (see [below](#actions)) lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the actor implemented using the computation expression gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. If an actor is built using `HandleMessages`, then performance on par with Akkling can be achieved if `ContinueWith` is used for state management, and parity with Akka can be achieved if mutable state and `Continue` is used (see [below](#handlemessages)).  
 
 ## Usage
 
@@ -96,7 +94,7 @@ let workflow = actor {
 This actor would wait for two messages, then send a message to another actor, and finally stop (reaching the end of the CE will cause the actor to stop).
 
 ### Spawning Actors
-Actors are spawned using the `WAkka.Spawn.spawn` function. The parent, properties, and actor type for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>` pointing at the new actor is returned. The `'Msg` type is inferred from the calling context. If you want to fix the message type in the actor reference then wrap your call to `spawn` in a function and specify the message type for the returned reference:
+Actors are normally spawned using the `WAkka.Spawn.spawn` function. For specialized cases where an actor class is needed (e.g., remote deployment) please see [below](#alternate-spawning-via-actor-classes). The parent, properties, and actor type for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>` pointing at the new actor is returned. The `'Msg` type is inferred from the calling context. If you want to fix the message type in the actor reference then wrap your call to `spawn` in a function and specify the message type for the returned reference:
 
 ```f#
 open WAkka
@@ -117,6 +115,12 @@ let act2 = Spawn.spawn parent Context.Props.Anonymous (Spawn.notPersistent workf
 ```
 
 In this case the actors were started with no persistence. To use checkpointing just substitute `Spawn.checkpointed` for `Spawn.notPersistent`. As they stand, the actions are not compatible with `Spawn.eventSourced` which would start an actor that uses Akka.NET persistence (see the built-in `persist` action below).
+
+#### Alternate spawning via actor classes
+
+In most cases, starting actors using the `spawn` function as above should be sufficient. But in some cases (e.g., remote deployment), we need to implement the actor using a class derived from `Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka provides a way to do this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`, and `WAkka.EventSourced.EventSourcedActor.EventSourcedActor` classes that correspond to actors started using `notPersisted`, `checkpointed` and `eventSourced` respectively. One derives a class from the appropriate base class for the type of actor wanted, passing the action to execute to the sub-class constructor. This class can then be used anywhere one would use any other Akka actor class.
+
+Note that if you are using this to do remote deployment or pooled routers in clusters then the usual rules apply. All of your constructor arguments must be serializable and the class must exist in each process where the actors are to be remotely deployed. WAkka actions are not serializable which is why you need to derive a class from one of the provided base classes instead of just using them directly and passing the action to their constructors when doing remote deployment. 
 
 ### Built-in actions
 Actor computation expressions are built using the actions built into WAkka. So far we've seen `Receive.Any`, `Receive.Only`, and `send` (in the guise of the `<!` operator) in the examples above. There are three classes of built-in actions:
