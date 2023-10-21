@@ -61,7 +61,7 @@ type ActorBuilder () =
 /// Builds an EventSourced action.
 let actor = ActorBuilder ()
 
-module private EventSourcedActor =
+module private EventSourcedActorPrivate =
 
     type Stopped = Stopped
     
@@ -70,109 +70,115 @@ module private EventSourcedActor =
         | Failed of exn * obj
         | Rejected of result:obj * reason:exn * sequenceNr:int64
 
-    type Actor(startAction: EventSourcedAction<unit>) as this =
+open EventSourcedActorPrivate
 
-        inherit Akka.Persistence.UntypedPersistentActor ()
+/// <summary>
+/// Class that can be used to spawn eventSourced actors. Usually, Spawn.spawn should be used to spawn actors, but if
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// can be derived from this class instead.  
+/// </summary>
+/// <param name="startAction">The action for the actor to run.</param>
+type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
 
-        let ctx = Akka.Persistence.Eventsourced.Context
+    inherit Akka.Persistence.UntypedPersistentActor ()
+
+    let ctx = Akka.Persistence.Eventsourced.Context
+    
+    let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+    let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+
+    let mutable msgHandler = fun (_recovering: bool) _ -> ()
+    let mutable rejectionHandler = fun (_result:obj, _reasons: exn, _sequenceNr: int64)  -> ()
+    
+    let rec handleActions recovering action =
+        match action with
+        | Done _
+        | Stop _ ->
+            ctx.Stop ctx.Self
+        | Simple next ->
+            handleActions recovering (next this)
+        | Extra (extra, next) ->
+            match extra with
+            | RunAction subAction ->
+                if recovering then
+                    msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
+                else
+                    handleSubActions next subAction
+            | GetRecovering ->
+                handleActions recovering (next recovering)
+
+    and handleSubActions cont subAction =
+        match subAction with
+        | Simple.SimpleAction.Done res ->
+            rejectionHandler <- (fun (result, reason, sn) -> handleActions false (cont (Rejected (result, reason, sn) :> obj)))
+            this.Persist (res, fun evt -> handleActions false (cont evt))
+        | Simple.SimpleAction.Stop _ ->
+            rejectionHandler <- (fun _ -> ctx.Stop ctx.Self)
+            this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
+        | Simple.SimpleAction.Simple next ->
+            handleSubActions cont (next this)
+        | Simple.SimpleAction.Extra (_, next) ->
+            msgHandler <- (fun _ msg -> handleSubActions cont (next msg))
+
+    do msgHandler <- (fun recovering msg ->
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
+    )
+
+    override this.PersistenceId = ctx.Self.Path.ToString()
+
+    override _.OnCommand (msg: obj) =
+        msgHandler false msg
+
+    override _.OnPersistRejected(cause, event, sequenceNr) =
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
+        rejectionHandler (event, cause, sequenceNr)
+
+    override _.OnRecover (msg: obj) =
+        match msg with
+        | :? Akka.Persistence.RecoveryCompleted ->
+            msgHandler false (Completed :> obj)
+        | :? EventSourcedActorPrivate.Stopped ->
+            ctx.Stop ctx.Self
+        | _ ->
+            msgHandler true msg
+
+    override _.OnRecoveryFailure(reason, message) =
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"recovery failed on message {message}: {reason}"
+        msgHandler false (Failed (reason, message) :> obj)
+
+    override this.PreRestart(reason, message) =
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"Actor crashed on {message}: {reason}"
+        restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
+        base.PreRestart(reason, message)
+
+    override _.PreStart () =
+        handleActions true startAction
         
-        let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
-        let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+    override _.PostStop () =
+        stopHandlers.ExecuteHandlers (this :> IActorContext)
+        base.PostStop ()
 
-        let mutable msgHandler = fun (_recovering: bool) _ -> ()
-        let mutable rejectionHandler = fun (_result:obj, _reasons: exn, _sequenceNr: int64)  -> ()
-        
-        let rec handleActions recovering action =
-            match action with
-            | Done _
-            | Stop _ ->
-                ctx.Stop ctx.Self
-            | Simple next ->
-                handleActions recovering (next this)
-            | Extra (extra, next) ->
-                match extra with
-                | RunAction subAction ->
-                    if recovering then
-                        msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
-                    else
-                        handleSubActions next subAction
-                | GetRecovering ->
-                    handleActions recovering (next recovering)
+    interface IActionContext with
+        member _.Context = ctx
+        member _.Self = ctx.Self
+        member _.Logger = Logger ctx
+        member _.Sender = ctx.Sender
+        member _.Scheduler = ctx.System.Scheduler
+        member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
+        member _.Watch act = ctx.Watch act |> ignore
+        member _.Unwatch act = ctx.Unwatch act |> ignore
+        member _.ActorSelection (path: string) = ctx.ActorSelection path
+        member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
+        member _.Stash = this.Stash
+        member _.SetRestartHandler handler = restartHandlers.AddHandler handler
+        member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
+        member _.SetStopHandler handler = stopHandlers.AddHandler handler
+        member _.ClearStopHandler id = stopHandlers.RemoveHandler id
 
-        and handleSubActions cont subAction =
-            match subAction with
-            | Simple.SimpleAction.Done res ->
-                rejectionHandler <- (fun (result, reason, sn) -> handleActions false (cont (Rejected (result, reason, sn) :> obj)))
-                this.Persist (res, fun evt -> handleActions false (cont evt))
-            | Simple.SimpleAction.Stop _ ->
-                rejectionHandler <- (fun _ -> ctx.Stop ctx.Self)
-                this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
-            | Simple.SimpleAction.Simple next ->
-                handleSubActions cont (next this)
-            | Simple.SimpleAction.Extra (_, next) ->
-                msgHandler <- (fun _ msg -> handleSubActions cont (next msg))
-
-        do msgHandler <- (fun recovering msg ->
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
-            logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
-        )
-
-        override this.PersistenceId = ctx.Self.Path.ToString()
-
-        override _.OnCommand (msg: obj) =
-            msgHandler false msg
-
-        override _.OnPersistRejected(cause, event, sequenceNr) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
-            logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
-            rejectionHandler (event, cause, sequenceNr)
-
-        override _.OnRecover (msg: obj) =
-            match msg with
-            | :? Akka.Persistence.RecoveryCompleted ->
-                msgHandler false (Completed :> obj)
-            | :? Stopped ->
-                ctx.Stop ctx.Self
-            | _ ->
-                msgHandler true msg
-
-        override _.OnRecoveryFailure(reason, message) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
-            logger.Error $"recovery failed on message {message}: {reason}"
-            msgHandler false (Failed (reason, message) :> obj)
-
-        override this.PreRestart(reason, message) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
-            logger.Error $"Actor crashed on {message}: {reason}"
-            restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
-            base.PreRestart(reason, message)
-
-        override _.PreStart () =
-            handleActions true startAction
-            
-        override _.PostStop () =
-            stopHandlers.ExecuteHandlers (this :> IActorContext)
-            base.PostStop ()
-
-        interface IActionContext with
-            member _.Context = ctx
-            member _.Self = ctx.Self
-            member _.Logger = Logger ctx
-            member _.Sender = ctx.Sender
-            member _.Scheduler = ctx.System.Scheduler
-            member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
-            member _.Watch act = ctx.Watch act |> ignore
-            member _.Unwatch act = ctx.Unwatch act |> ignore
-            member _.ActorSelection (path: string) = ctx.ActorSelection path
-            member _.ActorSelection (path: Akka.Actor.ActorPath) = ctx.ActorSelection path
-            member _.Stash = this.Stash
-            member _.SetRestartHandler handler = restartHandlers.AddHandler handler
-            member _.ClearRestartHandler id = restartHandlers.RemoveHandler id
-            member _.SetStopHandler handler = stopHandlers.AddHandler handler
-            member _.ClearStopHandler id = stopHandlers.RemoveHandler id
-
-
-open EventSourcedActor
 
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit>) =
     let applyMod arg modifier current =
@@ -180,7 +186,7 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action:
         | Some a -> modifier a current
         | None -> current        
     let actProps =
-        Akka.Actor.Props.Create(fun () -> Actor(action))
+        Akka.Actor.Props.Create(fun () -> EventSourcedActor(action))
         |> applyMod props.dispatcher (fun d a -> a.WithDispatcher d)
         |> applyMod props.deploy (fun d a -> a.WithDeploy d)
         |> applyMod props.mailbox (fun d a -> a.WithMailbox d)
@@ -280,8 +286,8 @@ module Actions =
 let mapArray (func: 'a -> EventSourcedAction<'b>) (values: 'a []) : EventSourcedAction<'b []> =
     let rec loop (results: 'b []) i = ActorBuilder () {
         if i < values.Length then
-            let! res = func values.[i]
-            results.[i] <- res
+            let! res = func values[i]
+            results[i] <- res
             return! loop results (i + 1)
         else
             return results
