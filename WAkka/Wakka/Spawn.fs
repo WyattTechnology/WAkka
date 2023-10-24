@@ -35,7 +35,7 @@ type ActorType =
     private
     | NotPersisted of Simple.SimpleAction<unit>
     | Checkpointed of Simple.SimpleAction<unit>
-    | EventSourced of EventSourced.EventSourcedAction<unit>
+    | EventSourced of EventSourced.EventSourcedAction<unit, EventSourced.NoSnapshotExtra>
 
 /// Creates an actor that goes back to the given action if it restarts.
 let notPersisted action = NotPersisted action
