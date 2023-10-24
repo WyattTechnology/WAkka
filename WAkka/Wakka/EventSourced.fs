@@ -35,6 +35,10 @@ open Common
 type EventSourcedExtra =
     | RunAction of Simple.SimpleAction<obj>
     | GetRecovering
+    | GetLastSequenceNumber
+    | SaveSnapshot of snapshot:obj
+    | DeleteSnapshot of sequenceNr:int64
+    | DeleteSnapshots of criteria:Akka.Persistence.SnapshotSelectionCriteria
     
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
 type EventSourcedAction<'Result> = ActionBase<'Result, EventSourcedExtra>
@@ -73,24 +77,30 @@ module private EventSourcedActorPrivate =
 open EventSourcedActorPrivate
 
 /// <summary>
-/// Class that can be used to spawn eventSourced actors. Usually, Spawn.spawn should be used to spawn actors, but if
-/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
-/// can be derived from this class instead.  
+/// Base class for event sourced actors. This class should not be used directly, instead use EventSourcedActor or EventSourcedSnapshotActor.  
 /// </summary>
-/// <param name="startAction">The action for the actor to run.</param>
-type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
+type EventSourcedActorBase(
+    startAction: EventSourcedAction<unit>,
+    ?snapshotHandler: obj -> EventSourcedAction<unit>
+) as this =
 
     inherit Akka.Persistence.UntypedPersistentActor ()
 
     let ctx = Akka.Persistence.Eventsourced.Context
     
+    let snapshotHandler = defaultArg snapshotHandler (fun snapshot ->
+        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        logger.Error $"Got snapshot offer without handler (stopping actor): {snapshot}"
+        stop ()
+    )
+    
     let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
     let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
 
-    let mutable msgHandler = fun (_recovering: bool) _ -> ()
+    let mutable msgHandler = fun (_recovering: bool) _msg -> ()
     let mutable rejectionHandler = fun (_result:obj, _reasons: exn, _sequenceNr: int64)  -> ()
     
-    let rec handleActions recovering action =
+    let rec handleActions recovering action = //DIFF
         match action with
         | Done _
         | Stop _ ->
@@ -106,6 +116,17 @@ type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
                     handleSubActions next subAction
             | GetRecovering ->
                 handleActions recovering (next recovering)
+            | GetLastSequenceNumber ->
+                handleActions recovering (next this.LastSequenceNr)
+            | SaveSnapshot snapshot ->
+                this.SaveSnapshot snapshot
+                handleActions recovering (next ())
+            | DeleteSnapshot sequenceNr ->
+                this.DeleteSnapshot sequenceNr
+                handleActions recovering (next ())
+            | DeleteSnapshots criteria ->
+                this.DeleteSnapshots criteria
+                handleActions recovering (next ())
 
     and handleSubActions cont subAction =
         match subAction with
@@ -124,6 +145,8 @@ type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
         let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
         logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
     )
+    
+    let mutable actionsInitialized = false
 
     override this.PersistenceId = ctx.Self.Path.ToString()
 
@@ -135,13 +158,22 @@ type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
         logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
         rejectionHandler (event, cause, sequenceNr)
 
-    override _.OnRecover (msg: obj) =
+    override _.OnRecover (msg: obj) = //DIFF
         match msg with
+        | :? Akka.Persistence.SnapshotOffer as snapshot ->
+            handleActions true (snapshotHandler snapshot.Snapshot)
+            actionsInitialized <- true
         | :? Akka.Persistence.RecoveryCompleted ->
+            if not actionsInitialized then
+                handleActions true startAction
+                actionsInitialized <- true
             msgHandler false (Completed :> obj)
         | :? EventSourcedActorPrivate.Stopped ->
             ctx.Stop ctx.Self
         | _ ->
+            if not actionsInitialized then
+                handleActions true startAction
+                actionsInitialized <- true
             msgHandler true msg
 
     override _.OnRecoveryFailure(reason, message) =
@@ -154,10 +186,7 @@ type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
         logger.Error $"Actor crashed on {message}: {reason}"
         restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
         base.PreRestart(reason, message)
-
-    override _.PreStart () =
-        handleActions true startAction
-        
+    
     override _.PostStop () =
         stopHandlers.ExecuteHandlers (this :> IActorContext)
         base.PostStop ()
@@ -179,6 +208,23 @@ type EventSourcedActor(startAction: EventSourcedAction<unit>) as this =
         member _.SetStopHandler handler = stopHandlers.AddHandler handler
         member _.ClearStopHandler id = stopHandlers.RemoveHandler id
 
+/// <summary>
+/// Class that can be used to spawn eventSourced actors. Usually, Spawn.spawn should be used to spawn actors, but if
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// can be derived from this class instead.  
+/// </summary>
+/// <param name="startAction">The action for the actor to run.</param>
+type EventSourcedActor(startAction: EventSourcedAction<unit>) = inherit EventSourcedActorBase(startAction)
+
+/// <summary>
+/// Class that can be used to spawn eventSourced actors. Usually, Spawn.spawn should be used to spawn actors, but if
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// can be derived from this class instead.  
+/// </summary>
+/// <param name="startAction">The action for the actor to run.</param>
+/// <param name="snapshotHandler">If a snapshot is offered by the persistence system then it will be passed to this function to generate and initial action to use instead of startAction.</param>
+type EventSourcedSnapshotActor(startAction: EventSourcedAction<unit>, snapshotHandler: obj -> EventSourcedAction<unit>) =
+    inherit EventSourcedActorBase(startAction, snapshotHandler)
 
 let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit>) =
     let applyMod arg modifier current =
@@ -280,6 +326,33 @@ module Actions =
     let isRecovering () : EventSourcedAction<bool> = actor {
         let! res = Extra(GetRecovering, Done)
         return (res :?> bool)
+    }
+    
+    /// Gets the sequence number of the last persistence operation.
+    let getLastSequenceNumber () : EventSourcedAction<int64> = actor {
+        let! res = Extra(GetLastSequenceNumber, Done)
+        return (res :?> int64)
+    }
+    
+    /// Saves a snapshot of the actor's state. If you are interested in success/failure then watch for
+    /// Akka.Persistence.SaveSnapshotSuccess and/or Akka.Persistence.SaveSnapshotFailure messages.  
+    let saveSnapshot (snapshot: obj) : EventSourcedAction<unit> = actor {
+        let! _ = Extra(SaveSnapshot snapshot, Done)
+        return ()
+    }
+
+    /// Deletes a snapshot of the actor's state. If you are interested in success/failure then watch for
+    /// Akka.Persistence.DeleteSnapshotSuccess and/or Akka.Persistence.DeleteSnapshotFailure messages.
+    let deleteSnapshot (sequenceNr: int64) : EventSourcedAction<unit> = actor {
+        let! _ = Extra(DeleteSnapshot sequenceNr, Done)
+        return ()
+    }
+    
+    /// Deletes snapshots of the actor's state. If you are interested in success/failure then watch for
+    /// Akka.Persistence.DeleteSnapshotsSuccess and/or Akka.Persistence.DeleteSnapshotsFailure messages.
+    let deleteSnapshots (criteria: Akka.Persistence.SnapshotSelectionCriteria) : EventSourcedAction<unit> = actor {
+        let! _ = Extra(DeleteSnapshots criteria, Done)
+        return ()
     }
     
 ///Maps the given function over the given array within an actor expression.

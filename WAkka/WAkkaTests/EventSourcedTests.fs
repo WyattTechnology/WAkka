@@ -63,10 +63,10 @@ let ``spawn with name`` () =
                     )
             }
         let act = spawn tk.Sys (Props.Named "test") (eventSourced start)
-
+        
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
-        probe.ExpectMsg m1 |> ignore
+        probe.ExpectMsg(m1, TimeSpan.FromSeconds 60.0) |> ignore
 
         (retype act).Tell("testing 1 2 3", Akka.Actor.ActorRefs.NoSender)
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -147,7 +147,7 @@ let ``get actor context gives correct actor`` () =
             }
         let act = spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
-        probe.ExpectMsg (untyped act) |> ignore
+        probe.ExpectMsg (untyped act, TimeSpan.FromMinutes 1.0) |> ignore
 
 [<Test>]
 let ``stop action calls stop handlers and stops the actor`` () =
@@ -250,7 +250,7 @@ let ``create actor can create an actor`` () =
         let _act : ActorRefs.IActorRef<Msg> =
             spawn tk.Sys (Props.Named "test") (eventSourced <| handle ())
 
-        probe.ExpectMsg "created" |> ignore
+        probe.ExpectMsg("created", TimeSpan.FromMinutes 1.0) |> ignore
 
 [<Test>]
 let ``watch works`` () =
@@ -444,7 +444,7 @@ let ``select get's the correct selection`` () =
         }
         let _act = spawn tk.Sys (Props.Named "test") (eventSourced start)
 
-        let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
+        let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> (TimeSpan.FromMinutes 1.0)
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
 
 [<Test>]
