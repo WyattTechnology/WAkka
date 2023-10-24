@@ -43,7 +43,8 @@ let notPersisted action = NotPersisted action
 /// was waiting for a message.
 let checkpointed action = Checkpointed action
 /// Creates an actor that uses the Akka.NET persistence event sourcing mechanism. In the event of a restart, the actor
-/// will replay events that were stored using the EventSourced.Actions.persist action.
+/// will replay events that were stored using the EventSourced.Actions.persist action. NOTE: This function is deprecated,
+/// use EventSourced.spawnNoSnapshots or EventSourced.spawnSnapshots instead.
 let eventSourced action = EventSourced action
 
 /// Creates a new actor that is a child of the given parent. The actor will be created using the given properties and
@@ -56,4 +57,4 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Common.Props) (actorType
     | Checkpointed action ->
         Simple.spawn parent props true action
     | EventSourced action ->
-        EventSourced.spawn parent props action
+        EventSourced.spawnNoSnapshots parent props action
