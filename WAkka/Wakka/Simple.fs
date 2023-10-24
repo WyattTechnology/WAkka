@@ -436,6 +436,23 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist
             parent.ActorOf(actProps)
     Akkling.ActorRefs.typed act
 
+/// <summary>
+/// Creates an actor that goes back to the given action if it restarts.
+/// </summary>
+/// <param name="parent">The parent for the actor.</param>
+/// <param name="props">The properties for the actor.</param>
+/// <param name="action">The action for the actor to execute.</param>
+let spawnNotPersisted parent props action = spawn parent props false action
+
+/// <summary>
+/// Creates and actor that runs the given action. If the actor crashes then it restarts from the last point where it
+/// was waiting for a message.
+/// </summary>
+/// <param name="parent">The parent for the actor.</param>
+/// <param name="props">The properties for the actor.</param>
+/// <param name="action">The action for the actor to execute.</param>
+let spawnCheckpointed parent props action = spawn parent props true action
+
 [<AutoOpen>]
 module Actions =
 
