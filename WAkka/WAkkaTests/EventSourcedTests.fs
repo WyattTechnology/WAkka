@@ -569,10 +569,10 @@ let ``state is recovered after a crash`` () =
             return ()
         }
         let parentProps = {
-            Props.Named "parent" with
+            Common.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Spawn.spawn tk.Sys parentProps (Spawn.notPersisted start)
+        let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
 
         let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
         events.ExpectMsg PersistResult<List<string>>.RecoveryDone |> ignore
@@ -625,10 +625,10 @@ let ``state is recovered after a crash with simple persist`` () =
             return ()
         }
         let parentProps = {
-            Props.Named "parent" with
+            Common.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Spawn.spawn tk.Sys parentProps (Spawn.notPersisted start)
+        let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
 
         let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
         let msg1 = "1"

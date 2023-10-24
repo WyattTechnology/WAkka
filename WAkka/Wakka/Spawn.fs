@@ -59,4 +59,4 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Common.Props) (actorType
     | Checkpointed action ->
         Simple.spawn parent props true action
     | EventSourced action ->
-        EventSourced.spawnNoSnapshots parent props action
+        EventSourced.spawnNoSnapshots parent {persistenceId = None; common = props} action

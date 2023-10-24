@@ -89,6 +89,7 @@ module Internal =
         abstract member HandleSnapshotExtra: 'Snapshot -> Akka.Persistence.UntypedPersistentActor -> (obj -> EventSourcedAction<'a, 'Snapshot>) -> EventSourcedAction<'a, 'Snapshot>
     
     type EventSourcedActorBase<'Snapshot>(
+        persistenceId: Option<string>,
         handler: IActionHandler<'Snapshot>
     ) as this =
 
@@ -141,7 +142,7 @@ module Internal =
         
         let mutable actionsInitialized = false
 
-        override this.PersistenceId = ctx.Self.Path.ToString()
+        override this.PersistenceId = defaultArg persistenceId (ctx.Self.Path.ToString())
 
         override _.OnCommand (msg: obj) =
             msgHandler false msg
@@ -221,7 +222,8 @@ type private NoSnapshotHandler (startAction) =
 /// can be derived from this class instead.  
 /// </summary>
 /// <param name="startAction">The action for the actor to run.</param>
-type EventSourcedActor(startAction: EventSourcedAction<unit, NoSnapshotExtra>) = inherit Internal.EventSourcedActorBase<NoSnapshotExtra>(NoSnapshotHandler startAction)
+type EventSourcedActor(startAction: EventSourcedAction<unit, NoSnapshotExtra>, ?persistenceId) =
+    inherit Internal.EventSourcedActorBase<NoSnapshotExtra>(persistenceId, NoSnapshotHandler startAction)
 
 type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
     interface Internal.IActionHandler<SnapshotExtra<'Snapshot>> with
@@ -251,9 +253,53 @@ type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
 /// </summary>
 /// <param name="startAction">The action for the actor to run.</param>
 /// <param name="snapshotHandler">If a snapshot is offered by the persistence system then it will be passed to this function to generate and initial action to use instead of startAction.</param>
-type EventSourcedSnapshotActor<'Snapshot>(startAction: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>, snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>) =
-    inherit Internal.EventSourcedActorBase<SnapshotExtra<'Snapshot>>(SnapshotHandler(startAction, snapshotHandler))
+type EventSourcedSnapshotActor<'Snapshot>(
+    startAction: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>,
+    snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>,
+    ?persistenceId
+) =
+    inherit Internal.EventSourcedActorBase<SnapshotExtra<'Snapshot>>(persistenceId, SnapshotHandler(startAction, snapshotHandler))
 
+/// <summary>
+/// The properties for an event sourced actor.
+/// </summary>
+type Props = {
+    /// The persistence id for the actor. If None then the actor's path will be used.
+    persistenceId: Option<string>
+    /// The common properties for the actor.
+    common: Common.Props
+}
+with
+    /// <summary>
+    /// Creates a Props object with empty persistence id and the given name.
+    /// </summary>
+    /// <param name="name">The name for the actor.</param>
+    static member Named name = {
+        persistenceId = None
+        common = Common.Props.Named name
+    }
+    
+    /// <summary>
+    /// Creates a Props object with empty persistence id and no name.
+    /// </summary>
+    static member Anonymous = {
+        persistenceId = None
+        common = Common.Props.Anonymous
+    }
+    
+    /// <summary>
+    /// Creates a Props object with the given persistence id and name.
+    /// </summary>
+    /// <param name="id">The persistence id for the actor.</param>
+    /// <param name="name">The name for the actor (default produces an anonymous actor).</param>
+    static member PersistenceId(id, ?name) = {
+        persistenceId = Some id
+        common =
+            match name with
+            | Some n -> Common.Props.Named n
+            | None -> Common.Props.Anonymous 
+    }
+    
 /// <summary>
 /// Spawns an event sourced actor. This variant does not support snapshots.
 /// </summary>
@@ -266,18 +312,13 @@ let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: Props) (actio
         | Some a -> modifier a current
         | None -> current        
     let actProps =
-        Akka.Actor.Props.Create(fun () -> EventSourcedActor(action))
-        |> applyMod props.dispatcher (fun d a -> a.WithDispatcher d)
-        |> applyMod props.deploy (fun d a -> a.WithDeploy d)
-        |> applyMod props.mailbox (fun d a -> a.WithMailbox d)
-        |> applyMod props.router (fun d a -> a.WithRouter d)
-        |> applyMod props.supervisionStrategy (fun d a -> a.WithSupervisorStrategy d)
-    let act =
-        match props.name with
-        | Some name ->
-            parent.ActorOf(actProps, name)
-        | None ->
-            parent.ActorOf(actProps)
+        Akka.Actor.Props.Create(fun () -> EventSourcedActor(action, ?persistenceId = props.persistenceId))
+        |> applyMod props.common.dispatcher (fun d a -> a.WithDispatcher d)
+        |> applyMod props.common.deploy (fun d a -> a.WithDeploy d)
+        |> applyMod props.common.mailbox (fun d a -> a.WithMailbox d)
+        |> applyMod props.common.router (fun d a -> a.WithRouter d)
+        |> applyMod props.common.supervisionStrategy (fun d a -> a.WithSupervisorStrategy d)
+    let act = parent.ActorOf(actProps, ?name = props.common.name)
     Akkling.ActorRefs.typed act
 
 /// <summary>
@@ -298,18 +339,13 @@ let spawnSnapshots
         | Some a -> modifier a current
         | None -> current        
     let actProps =
-        Akka.Actor.Props.Create(fun () -> EventSourcedSnapshotActor(action, snapshotHandler))
-        |> applyMod props.dispatcher (fun d a -> a.WithDispatcher d)
-        |> applyMod props.deploy (fun d a -> a.WithDeploy d)
-        |> applyMod props.mailbox (fun d a -> a.WithMailbox d)
-        |> applyMod props.router (fun d a -> a.WithRouter d)
-        |> applyMod props.supervisionStrategy (fun d a -> a.WithSupervisorStrategy d)
-    let act =
-        match props.name with
-        | Some name ->
-            parent.ActorOf(actProps, name)
-        | None ->
-            parent.ActorOf(actProps)
+        Akka.Actor.Props.Create(fun () -> EventSourcedSnapshotActor(action, snapshotHandler, ?persistenceId = props.persistenceId))
+        |> applyMod props.common.dispatcher (fun d a -> a.WithDispatcher d)
+        |> applyMod props.common.deploy (fun d a -> a.WithDeploy d)
+        |> applyMod props.common.mailbox (fun d a -> a.WithMailbox d)
+        |> applyMod props.common.router (fun d a -> a.WithRouter d)
+        |> applyMod props.common.supervisionStrategy (fun d a -> a.WithSupervisorStrategy d)
+    let act = parent.ActorOf(actProps, ?name = props.common.name)
     Akkling.ActorRefs.typed act
 
 [<AutoOpen>]
