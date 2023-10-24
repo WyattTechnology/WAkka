@@ -36,6 +36,7 @@ type NoSnapshotExtra = NoSnapshotExtra
 
 type SnapshotExtra<'Snapshot> =
     | GetLastSequenceNumber
+    | DeleteEvents of sequenceNr:int64
     | SaveSnapshot of snapshot:'Snapshot
     | DeleteSnapshot of sequenceNr:int64
     | DeleteSnapshots of criteria:Akka.Persistence.SnapshotSelectionCriteria
@@ -230,6 +231,9 @@ type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
             match extra with
             | GetLastSequenceNumber ->
                 next act.LastSequenceNr
+            | DeleteEvents sequenceNr ->
+                act.DeleteMessages sequenceNr
+                next ()
             | SaveSnapshot snapshot ->
                 act.SaveSnapshot snapshot
                 next ()
@@ -398,6 +402,13 @@ module Actions =
         return (res :?> int64)
     }
     
+    /// Deletes events up to the given sequence number. If you are interested in success/failure then watch for
+    /// Akka.Persistence.DeleteMessagesSuccess and/or Akka.Persistence.DeleteMessagesFailure messages.
+    let deleteEvents (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
+        let! _ = Extra(Snapshot (DeleteEvents sequenceNr), Done)
+        return ()
+    }
+
     /// Saves a snapshot of the actor's state. If you are interested in success/failure then watch for
     /// Akka.Persistence.SaveSnapshotSuccess and/or Akka.Persistence.SaveSnapshotFailure messages.  
     let saveSnapshot (snapshot: 'SnapShot) : SnapshotAction<unit, 'SnapShot> = actor {
@@ -405,14 +416,14 @@ module Actions =
         return ()
     }
 
-    /// Deletes a snapshot of the actor's state. If you are interested in success/failure then watch for
+    /// Deletes snapshots up to the given sequence number. If you are interested in success/failure then watch for
     /// Akka.Persistence.DeleteSnapshotSuccess and/or Akka.Persistence.DeleteSnapshotFailure messages.
     let deleteSnapshot (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshot sequenceNr), Done)
         return ()
     }
     
-    /// Deletes snapshots of the actor's state. If you are interested in success/failure then watch for
+    /// Deletes snapshots that satisfy the given criteria. If you are interested in success/failure then watch for
     /// Akka.Persistence.DeleteSnapshotsSuccess and/or Akka.Persistence.DeleteSnapshotsFailure messages.
     let deleteSnapshots (criteria: Akka.Persistence.SnapshotSelectionCriteria) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshots criteria), Done)
