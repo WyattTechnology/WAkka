@@ -34,9 +34,9 @@ open Common
 
 type NoSnapshotExtra = NoSnapshotExtra
 
-type SnapshotExtra =
+type SnapshotExtra<'Snapshot> =
     | GetLastSequenceNumber
-    | SaveSnapshot of snapshot:obj
+    | SaveSnapshot of snapshot:'Snapshot
     | DeleteSnapshot of sequenceNr:int64
     | DeleteSnapshots of criteria:Akka.Persistence.SnapshotSelectionCriteria
     
@@ -222,10 +222,10 @@ type private NoSnapshotHandler (startAction) =
 /// <param name="startAction">The action for the actor to run.</param>
 type EventSourcedActor(startAction: EventSourcedAction<unit, NoSnapshotExtra>) = inherit Internal.EventSourcedActorBase<NoSnapshotExtra>(NoSnapshotHandler startAction)
 
-type private SnapshotHandler (startAction, snapshotHandler) =
-    interface Internal.IActionHandler<SnapshotExtra> with
+type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
+    interface Internal.IActionHandler<SnapshotExtra<'Snapshot>> with
         member _.StartAction = startAction
-        member _.SnapshotHandler snapshot = snapshotHandler snapshot
+        member _.SnapshotHandler snapshot = snapshotHandler (snapshot :?> 'Snapshot)
         member _.HandleSnapshotExtra extra act next =
             match extra with
             | GetLastSequenceNumber ->
@@ -247,8 +247,8 @@ type private SnapshotHandler (startAction, snapshotHandler) =
 /// </summary>
 /// <param name="startAction">The action for the actor to run.</param>
 /// <param name="snapshotHandler">If a snapshot is offered by the persistence system then it will be passed to this function to generate and initial action to use instead of startAction.</param>
-type EventSourcedSnapshotActor(startAction: EventSourcedAction<unit, SnapshotExtra>, snapshotHandler: obj -> EventSourcedAction<unit, SnapshotExtra>) =
-    inherit Internal.EventSourcedActorBase<SnapshotExtra>(SnapshotHandler(startAction, snapshotHandler))
+type EventSourcedSnapshotActor<'Snapshot>(startAction: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>, snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>) =
+    inherit Internal.EventSourcedActorBase<SnapshotExtra<'Snapshot>>(SnapshotHandler(startAction, snapshotHandler))
 
 /// <summary>
 /// Spawns an event sourced actor. This variant does not support snapshots.
@@ -286,8 +286,8 @@ let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: Props) (actio
 let spawnSnapshots
     (parent: Akka.Actor.IActorRefFactory)
     (props: Props)
-    (action: EventSourcedAction<unit, SnapshotExtra>)
-    (snapshotHandler: obj -> EventSourcedAction<unit, SnapshotExtra>)
+    (action: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>)
+    (snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>)
     =
     let applyMod arg modifier current =
         match arg with
@@ -390,31 +390,31 @@ module Actions =
         return (res :?> bool)
     }
     
-    type SnapshotAction<'Result> = EventSourcedAction<'Result, SnapshotExtra>
+    type SnapshotAction<'Result, 'SnapShot> = EventSourcedAction<'Result, SnapshotExtra<'SnapShot>>
     
     /// Gets the sequence number of the last persistence operation.
-    let getLastSequenceNumber () : SnapshotAction<int64> = actor {
+    let getLastSequenceNumber () : SnapshotAction<int64, 'SnapShot> = actor {
         let! res = Extra(Snapshot GetLastSequenceNumber, Done)
         return (res :?> int64)
     }
     
     /// Saves a snapshot of the actor's state. If you are interested in success/failure then watch for
     /// Akka.Persistence.SaveSnapshotSuccess and/or Akka.Persistence.SaveSnapshotFailure messages.  
-    let saveSnapshot (snapshot: obj) : SnapshotAction<unit> = actor {
+    let saveSnapshot (snapshot: 'SnapShot) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (SaveSnapshot snapshot), Done)
         return ()
     }
 
     /// Deletes a snapshot of the actor's state. If you are interested in success/failure then watch for
     /// Akka.Persistence.DeleteSnapshotSuccess and/or Akka.Persistence.DeleteSnapshotFailure messages.
-    let deleteSnapshot (sequenceNr: int64) : SnapshotAction<unit> = actor {
+    let deleteSnapshot (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshot sequenceNr), Done)
         return ()
     }
     
     /// Deletes snapshots of the actor's state. If you are interested in success/failure then watch for
     /// Akka.Persistence.DeleteSnapshotsSuccess and/or Akka.Persistence.DeleteSnapshotsFailure messages.
-    let deleteSnapshots (criteria: Akka.Persistence.SnapshotSelectionCriteria) : SnapshotAction<unit> = actor {
+    let deleteSnapshots (criteria: Akka.Persistence.SnapshotSelectionCriteria) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshots criteria), Done)
         return ()
     }
