@@ -520,6 +520,74 @@ let ``foldValues processes all elements`` () =
 
         probe.ExpectMsg (List.sum values) |> ignore
 
+[<Test>]
+let ``state is recovered when actor starts again using custom persistence id`` () =
+    TestKit.testDefault <| fun tk ->
+        let action = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Only<string>() with
+                | "get" ->
+                    let! sender = getSender()
+                    do! sender <! state
+                    return! inner state
+                | add ->
+                    return add
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                return! outer (state + add)
+            }
+            return! outer ""
+        }
+        
+        let act1 = spawnNoSnapshots tk.Sys (Props.PersistenceId("test-id", "act1")) action
+        tellNow act1 "1"
+        tellNow act1 "2"
+        tellNow act1 "3"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "123"
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let act2 = spawnNoSnapshots tk.Sys (Props.PersistenceId("test-id", "act2")) action
+        let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res2 |> shouldEqual "123"
+        
+[<Test>]
+let ``state is recovered when actor starts again using default persistence id`` () =
+    TestKit.testDefault <| fun tk ->
+        let action = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Only<string>() with
+                | "get" ->
+                    let! sender = getSender()
+                    do! sender <! state
+                    return! inner state
+                | add ->
+                    return add
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                return! outer (state + add)
+            }
+            return! outer ""
+        }
+        
+        let act1 = spawnNoSnapshots tk.Sys (Props.Named "test-id") action
+        tellNow act1 "1"
+        tellNow act1 "2"
+        tellNow act1 "3"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "123"
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let act2 = spawnNoSnapshots tk.Sys (Props.Named "test-id") action
+        let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res2 |> shouldEqual "123"
+        
 type CrashMsg = {
     msg: obj
     err: obj
