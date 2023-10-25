@@ -754,3 +754,209 @@ let ``Actor class: isRecovering gives correct results`` () =
         probe.ExpectMsg "Got RecoveryDone" |> ignore
         probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
     
+[<Test>]
+let ``state is recovered when actor starts again with snapshot`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let action initState = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Only<string>() with
+                | "get" ->
+                    let! sender = getSender()
+                    do! sender <! state
+                    return! inner state
+                | add ->
+                    return add
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                let newState = state + add
+                do! saveSnapshot newState
+                return! outer newState
+            }
+            return! outer initState
+        }
+        
+        let probe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            tellNow (typed probe) state
+            action state
+        let act1 = spawnSnapshots tk.Sys (Props.PersistenceId("snapshot-id", actorName = "act1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        tellNow act1 "1"
+        tellNow act1 "2"
+        tellNow act1 "3"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "123"
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let act2 = spawnSnapshots tk.Sys (Props.PersistenceId("snapshot-id", "act2")) (action "") handleSnapshot
+        probe.ExpectMsg "123" |> ignore
+        let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res2 |> shouldEqual "123"
+
+[<Test>]
+let ``message are deleted by delete messages`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let action initState = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Only<string>() with
+                | "get" ->
+                    let! sender = getSender()
+                    do! sender <! state
+                    return! inner state
+                | add ->
+                    return add
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                let newState = state + add
+                let! seqNum = getLastSequenceNumber()
+                do! deleteEvents seqNum
+                return! outer newState
+            }
+            return! outer initState
+        }
+        
+        let probe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            tellNow (typed probe) state
+            action state
+        let act1 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-events-id", actorName = "act1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        tellNow act1 "1"
+        tellNow act1 "2"
+        tellNow act1 "3"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "123"
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let act2 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-events-id", "act2")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res2 |> shouldEqual ""
+
+type DeleteSnapMsg =
+    | Add of string
+    | DeleteSnap
+    
+[<Test>]
+let ``snapshots are deleted by delete snapshot`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let del = tk.CreateTestProbe "del"
+        let action initState = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Any() with
+                | :? string as msg ->
+                    match msg with 
+                    | "get" ->
+                        let! sender = getSender()
+                        do! sender <! state
+                        return! inner state
+                    | add ->
+                        return Add add
+                | :? Akka.Persistence.SaveSnapshotSuccess ->
+                    return DeleteSnap
+                | _other ->
+                    return! inner state
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                match add with
+                | Add add -> 
+                    let newState = state + add
+                    do! saveSnapshot newState
+                    return! outer newState
+                | DeleteSnap ->
+                    let! isRecovering = isRecovering()
+                    if not isRecovering then 
+                        let! seqNum = getLastSequenceNumber()
+                        do! deleteSnapshot (seqNum - 1L)
+                        do! typed del <! "deleted"
+                    return! outer state
+            }
+            return! outer initState
+        }
+        
+        let probe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            tellNow (typed probe) state
+            action state
+        let act1 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-snapshot1-id", actorName = "act1-1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        tellNow act1 "1"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "1"
+        del.ExpectMsg("deleted") |> ignore //have to wait for snapshot delete to be done
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let _act2 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-snapshot1-id", "act2-1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+
+[<Test>]
+let ``snapshots are deleted by delete snapshots`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let del = tk.CreateTestProbe "del"
+        let action initState = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Any() with
+                | :? string as msg ->
+                    match msg with 
+                    | "get" ->
+                        let! sender = getSender()
+                        do! sender <! state
+                        return! inner state
+                    | add ->
+                        return Add add
+                | :? Akka.Persistence.SaveSnapshotSuccess ->
+                    return DeleteSnap
+                | _other ->
+                    return! inner state
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                match add with
+                | Add add -> 
+                    let newState = state + add
+                    do! saveSnapshot newState
+                    return! outer newState
+                | DeleteSnap ->
+                    let! isRecovering = isRecovering()
+                    if not isRecovering then 
+                        let! seqNum = getLastSequenceNumber()
+                        do! deleteSnapshots (Akka.Persistence.SnapshotSelectionCriteria seqNum)
+                        do! typed del <! "deleted"
+                    return! outer state
+            }
+            return! outer initState
+        }
+        
+        let probe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            tellNow (typed probe) state
+            action state
+        let act1 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-snapshot1-id", actorName = "act1-1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        tellNow act1 "1"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "1"
+        del.ExpectMsg("deleted") |> ignore //have to wait for snapshot delete to be done
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let _act2 = spawnSnapshots tk.Sys (Props.PersistenceId("delete-snapshot1-id", "act2-1")) (action "") handleSnapshot
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
