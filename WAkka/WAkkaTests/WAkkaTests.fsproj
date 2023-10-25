@@ -27,6 +27,7 @@
       <Compile Include="NotPersistedTests.fs" />
       <Compile Include="CheckpointedTests.fs" />
       <Compile Include="EventSourcedTests.fs" />
+      <Compile Include="SnapshotTests.fs" />
     </ItemGroup>
 
 </Project>
