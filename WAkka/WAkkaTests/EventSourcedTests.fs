@@ -244,7 +244,7 @@ let ``create actor can create an actor`` () =
                     spawnNoSnapshots parent Props.Anonymous child
                 )
                 let! _ = persistSimple(Receive.Any ())
-                return ()
+                return! handle ()
             }
         let _act : ActorRefs.IActorRef<Msg> =
             spawnNoSnapshots tk.Sys (Props.Named "test") (handle ())

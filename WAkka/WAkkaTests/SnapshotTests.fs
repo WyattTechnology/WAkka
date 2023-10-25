@@ -243,13 +243,13 @@ let ``create actor can create an actor`` () =
         let rec handle () =
             actor {
                 let! _newAct = createChild (fun parent ->
-                    spawnSnapshots parent Props.Anonymous child  (constAction child)
+                    spawnSnapshots parent Props.Anonymous child (constAction child)
                 )
                 let! _ = persistSimple(Receive.Any ())
-                return ()
+                return! handle ()
             }
         let _act : ActorRefs.IActorRef<Msg> =
-            spawnSnapshots tk.Sys (Props.Named "test") (handle ()) (constAction (handle ()))
+            spawnSnapshots tk.Sys (Props.Named "snap-test-1") (handle ()) (constAction (handle ()))
 
         probe.ExpectMsg("created") |> ignore
 
