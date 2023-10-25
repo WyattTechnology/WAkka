@@ -291,11 +291,11 @@ with
     /// Creates a Props object with the given persistence id and name.
     /// </summary>
     /// <param name="id">The persistence id for the actor.</param>
-    /// <param name="name">The name for the actor (default produces an anonymous actor).</param>
-    static member PersistenceId(id, ?name) = {
+    /// <param name="actorName">The name for the actor (default produces an anonymous actor).</param>
+    static member PersistenceId(id, ?actorName) = {
         persistenceId = Some id
         common =
-            match name with
+            match actorName with
             | Some n -> Common.Props.Named n
             | None -> Common.Props.Anonymous 
     }

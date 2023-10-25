@@ -540,7 +540,7 @@ let ``state is recovered when actor starts again using custom persistence id`` (
             return! outer ""
         }
         
-        let act1 = spawnNoSnapshots tk.Sys (Props.PersistenceId("test-id", "act1")) action
+        let act1 = spawnNoSnapshots tk.Sys (Props.PersistenceId("test-id", actorName = "act1")) action
         tellNow act1 "1"
         tellNow act1 "2"
         tellNow act1 "3"
