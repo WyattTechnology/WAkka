@@ -438,17 +438,17 @@ module Actions =
         return (res :?> int64)
     }
     
-    /// Deletes events up to the given sequence number. If you are interested in success/failure then watch for
-    /// Akka.Persistence.DeleteMessagesSuccess and/or Akka.Persistence.DeleteMessagesFailure messages.
-    let deleteEvents (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
-        let! _ = Extra(Snapshot (DeleteEvents sequenceNr), Done)
-        return ()
-    }
-
     /// Saves a snapshot of the actor's state. If you are interested in success/failure then watch for
     /// Akka.Persistence.SaveSnapshotSuccess and/or Akka.Persistence.SaveSnapshotFailure messages.  
     let saveSnapshot (snapshot: 'SnapShot) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (SaveSnapshot snapshot), Done)
+        return ()
+    }
+
+    /// Deletes events up to the given sequence number. If you are interested in success/failure then watch for
+    /// Akka.Persistence.DeleteMessagesSuccess and/or Akka.Persistence.DeleteMessagesFailure messages.
+    let deleteEvents (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
+        let! _ = Extra(Snapshot (DeleteEvents sequenceNr), Done)
         return ()
     }
 

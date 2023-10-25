@@ -51,8 +51,6 @@ let printMsg =
 
 That's always a difficult question to answer in a general fashion for a library since every possible user of the library is working under different constraints. One question that will affect everyone: is it stable? As far as we can tell the answer is yes. The library has been through multiple iterations internally at Wyatt Technology in multiple products and appears to be solid. That being said, as with all open source software, no warranty is implied or given. 
 
-Note that snapshotting is currently not supported for actors that use the Akka persistence system. 
-
 Performance of actors built with the `actor` computation expression (see [below](#actions)) lags behind those built using Akka or Akkling. In the simple test case given in the PerformanceTest project, the actor implemented using the computation expression gets around 55-60% of the message processing rate that Akka and Akkling can achieve. On a 2021 Apple M1 Processor, this still worked out to be around 900K messages per second. For us at Wyatt Technology this is way beyond our needs. Your needs may be different, so keep this limitation in mind. If an actor is built using `HandleMessages`, then performance on par with Akkling can be achieved if `ContinueWith` is used for state management, and parity with Akka can be achieved if mutable state and `Continue` is used (see [below](#handlemessages)).  
 
 ## Usage
@@ -94,31 +92,35 @@ let workflow = actor {
 This actor would wait for two messages, then send a message to another actor, and finally stop (reaching the end of the CE will cause the actor to stop).
 
 ### Spawning Actors
-Actors are normally spawned using the `WAkka.Spawn.spawn` function. For specialized cases where an actor class is needed (e.g., remote deployment) please see [below](#alternate-spawning-via-actor-classes). The parent, properties, and actor type for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>` pointing at the new actor is returned. The `'Msg` type is inferred from the calling context. If you want to fix the message type in the actor reference then wrap your call to `spawn` in a function and specify the message type for the returned reference:
+Actors are normally started using *spawn* functions defined in either the WAkka.Simple or WAkka.EventSourced modules. For specialized cases where an actor class is needed (e.g., remote deployment) please see Actor Classes [below](#alternate-spawning-via-actor-classes). The parent, properties, and action for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>` pointing at the new actor is returned. The `'Msg` type is inferred from the calling context. If you want to fix the message type in the actor reference then wrap your call to `spawn` in a function and specify the message type for the returned reference:
 
 ```f#
 open WAkka
-let startActor parent : IActorRef<string> = Spawn.spawn parent Context.Props.Anonymous action
+let startActor parent : IActorRef<string> = WAkka.Simple.spawnNotPersisted parent Context.Props.Anonymous action
 ```
 
-The properties are given using a `WAkka.Context.Props` object. For most actors, the defaults should be fine and the `Props.Anonymous` or `Props.Named` methods can be used to create an anonymous or named actor respectively. The members of `WAkka.Context.Props` are the same as what you would have when creating an actor in Akkling. So see that documentation if you need to change something from the defaults.
+The properties are given using a `WAkka.Context.Props` object (`WAkka.EventSourced.Props` if the actor is persistent). For most actors, the defaults should be fine and the `Props.Anonymous` or `Props.Named` methods can be used to create an anonymous or named actor respectively. The members of `WAkka.Context.Props` are the same as what you would have when creating an actor in Akkling. So see that documentation if you need to change something from the defaults.
 
-The actor type, which specifies how actor crashes are dealt with, is set using `WAkka.Spawn.ActorType` and associated functions. The simplest actor type is `notPersisted` which just restarts from the given action, no state is maintained across crashes. Next we have `checkpointed` which sets up the actor to return to the last place a message was waited for in the event of a crash. This will restore the state to what it was before the most recent message was received. Note that this actor will only restore state across an an actor restart, the state will not survive a process crash. To survive a process crash one needs to use `eventSourced` which creates an actor that uses the Akka.NET persistence mechanisms (see the built-in `persist` action below).
+The actor type, which specifies how actor crashes are dealt with, is set by which *spawn* function is used. The simplest actor type is *not persisted*. They are started by `WAkka.Simple.spawnNotPersisted`, and if they crash then they will restart from the given action, no state is maintained across crashes. Next we have *checkpointed* actors which is started by using `WAkka.Simple.spawnCheckpointed`. These actors return to the last place a message was waited for in the event of a crash. This will restore the state to what it was before the most recent message was received. Note that this actor will only restore state across an actor restart, the state will not survive a process crash. To survive a process crash one needs to use either `WAkka.EventSourced.spawnNoSnapshots` or `WAkka.EventSourced.spawnSnapshots` which creates an actor that uses the Akka.NET persistence mechanisms (see Event Sourced Actions [below](#event-sourced-actions)).
 
 To start the two actors above one would do:
 
 ```f#
 open WAkka
 
-let act1 = Spawn.spawn parent Context.Props.Anonymous (Spawn.notPersistent <| handle "")
-let act2 = Spawn.spawn parent Context.Props.Anonymous (Spawn.notPersistent workflow)
+let act1 = Simple.spawnNotPersisted parent Context.Props.Anonymous (handle "")
+let act2 = Simple.spawnNotPersisted parent Context.Props.Anonymous workflow
 ```
 
-In this case the actors were started with no persistence. To use checkpointing just substitute `Spawn.checkpointed` for `Spawn.notPersistent`. As they stand, the actions are not compatible with `Spawn.eventSourced` which would start an actor that uses Akka.NET persistence (see the built-in `persist` action below).
+In this case the actors were started with no persistence. To use checkpointing just substitute `Simple.spawnCheckpointed` for `Simple.spawnNotPersisted`. 
+
+#### Deprecated Spawn Functions
+
+Before version 1.5, WAkka spawned actors using the functions in the `WAkka.Spawn` module. Those functions still exist to support backwards compatibility, but should not be used in new code.
 
 #### Alternate spawning via actor classes
 
-In most cases, starting actors using the `spawn` function as above should be sufficient. But in some cases (e.g., remote deployment), we need to implement the actor using a class derived from `Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka provides a way to do this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`, and `WAkka.EventSourced.EventSourcedActor.EventSourcedActor` classes that correspond to actors started using `notPersisted`, `checkpointed` and `eventSourced` respectively. One derives a class from the appropriate base class for the type of actor wanted, passing the action to execute to the super-class constructor. This class can then be used anywhere one would use any other Akka actor class.
+In most cases, starting actors using the `spawn*` functions as above should be sufficient. But in some cases (e.g., remote deployment), we need to implement the actor using a class derived from `Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka provides a way to do this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`, `WAkka.EventSourced.EventSourcedActor` and `WAkka.EventSourced.EventSourcedSnapshotActor` classes that correspond to *not persisted*, *checkpointed*, *persistent (no snapshots)*, and *persistent (with snapshots)* actor types respectively. One derives a class from the appropriate base class for the type of actor wanted, passing the action to execute to the super-class constructor. This class can then be used anywhere one would use any other Akka actor class.
 
 Note that if you are using this to do remote deployment or pooled routers in clusters then the usual rules apply. All of your constructor arguments must be serializable and the class must exist in each process where the actors are to be remotely deployed. WAkka actions are not serializable which is why you need to derive a class from one of the provided base classes instead of just using them directly and passing the action to their constructors when doing remote deployment. 
 
@@ -157,9 +159,9 @@ The `Common` module also contains functions to change the result type of an acti
 
 #### Simple actions
 
-These actions can only be used directly in a simple actor (i.e. those started with `notPersisted` or `checkpointed`)
+These actions can only be used directly in a simple actor (i.e. those started with `Simple.spawnNotPersisted` or `Simple.spawnCheckpointed`)
 
-* `Receive`: Static methods of this class are used to receive messages. Each method has an optional timeout and those that filter messages have a *strategy* for dealing with messages that are filtered out. You can make custom *other message strategies*, but the most useful are already provided in `ignoreOthers` and 'stashOthers'. `ignoreOthers`, which is the default, will ignore any messages that are filtered out. `stashOthers` will stash messages that are filtered out, and then unstash them when a message satisfies the filter.
+* `Receive`: Static methods of this class are used to receive messages. Each method has an optional timeout and those that filter messages have a *strategy* for dealing with messages that are filtered out. You can make custom *other message strategies*, but the most useful are already provided in `ignoreOthers` and `stashOthers`. `ignoreOthers`, which is the default, will ignore any messages that are filtered out. `stashOthers` will stash messages that are filtered out, and then unstash them when a message satisfies the filter.
   * `Any`: Receive the next message (no filtering).
   * `Filter`: Receive messages until one is received that satisfies the given filter.
   * `Only<'Type>`: Receives messages until one of type `'Type` is received.
@@ -195,7 +197,7 @@ spawn parent Props.Anonymous (notPersistent (handle initState))
 ```
 
 This pattern comes up enough that we provide a special action for it: `HandleMessages`, which takes a message handling function that will be called for each message received. The message handling function returns one of the cases of `HandleMessagesResult`:
-* `IsDone result`: Stops message handling and returns control to where `HandleMessages` was called, causing the `HandleMessages` action to evaluate to `result`. If this was a call to `spawn`, then the actor will exit.
+* `IsDone result`: Stops message handling and returns control to where `HandleMessages` was called, causing the `HandleMessages` action to evaluate to `result`. If this was a call to a *spawn* function, then the actor will exit.
 * `Continue`: Continue to process messages with the same message handler.
 * `ContinueWith handler`: Continue to process messages using the given handler.
 * `ContinueWithAction action`: Run the given action. When the action finishes, its result will be the result of the `HandleMessages` action.
@@ -212,9 +214,9 @@ let rec handle state msg =
             HandleMessagesResult.Continue
     }
 }
-spawn parent Props.Anonymous (notPersistent (Receive.HandleMessages (handle initState)))
+Simple.spawnNotPersisted parent Props.Anonymous (Receive.HandleMessages (handle initState))
 ```
-This isn't terribly different than the original code, but has a few advantages. The message handling is not inside of a computation expression, so if the need arises to run it under a debugger, you will have a much easier time. The second example will also execute faster since it bypasses all the computation expression machinery (and it's concomitant memory allocations). For most actors the computation expression is probably fast enough, but if you want parity with either Akkling or Akka then using `HandleMessages` is called for. In fact, once can attain parity with the Akka UntypedActor with mutable state by making a change to the above example:
+This isn't terribly different than the original code, but has a few advantages. The message handling is not inside of a computation expression, so if the need arises to run it under a debugger, you will have a much easier time. The second example will also execute faster since it bypasses all the computation expression machinery (and it's concomitant memory allocations). For most actors the computation expression is probably fast enough, but if you want parity with either Akkling or Akka then using `HandleMessages` is called for. In fact, once can attain parity with the Akka `UntypedActor` with mutable state by making a change to the above example:
 ```f#
 let mutable state = initState
 let rec handle msg = 
@@ -229,10 +231,10 @@ let rec handle msg =
             HandleMessagesResult.Continue
     }
 }
-spawn parent Props.Anonymous (notPersistent (Receive.HandleMessages handle))
+Simple.spawnNotPersistent parent Props.Anonymous (Receive.HandleMessages handle)
 ```
 
-This example will not allocate any memory in the course of processing messages. It sacrifices *functional purity* since it uses mutable state, but if you need the absolute best possible performance it's not uncommon to have to make that sacrifice on a small scale in order to get it. 
+This example will not allocate any memory in the course of processing messages. It sacrifices *functional purity* since it uses mutable state, but if you need the absolute best possible performance, it's not uncommon to have to make that sacrifice on a small scale in order to get it. 
 
 Note that `HandleMessages` expects a function with signature `'Msg -> HandleMessagesResult<'Msg, 'Result>`. While the message handler is processing messages, any messages that are not of type `'Msg` will be ignored. If you want to receive all messages then your `'Msg` type must be `obj`. 
 
@@ -250,7 +252,7 @@ So when should you use the `actor` computation expression versus `HandleMessages
 
 #### Actor Result
 
-It is often useful to have actions that evaluate to the `Result` type. The `ActorResult` module defines a computation expression that combines these two types. I.e., the CE will execute actions until it runs out or an action evaluates to `Error`. The result of the CE is `Ok <value>` if it makes it to the end without getting an `Error`. `<value>` will be the return value of the CE. If an `Error` is encountered than the CE's value will be that error. Note that all elements in the CE must have the same `Error` type, but their `Ok` types can differ.
+It is sometimes useful to have actions that evaluate to the `Result` type. The `ActorResult` module defines a computation expression that combines these two types. I.e., the CE will execute actions until it runs out or an action evaluates to `Error`. The result of the CE is `Ok <value>` if it makes it to the end without getting an `Error`. `<value>` will be the return value of the CE. If an `Error` is encountered then the CE's value will be that error. Note that all elements in the CE must have the same `Error` type, but their `Ok` types can differ.
 
 The `actorResult` builder is used to build an actor result CE and it is run by passing it to `runActorResult`. For example:
 ```f#
@@ -278,7 +280,7 @@ The `ActorResult` module contains more functions to make working with this CE ea
 
 #### Event sourced actions
 
-These actions can only be used in an event sourced actor (i.e. those started using `eventSourced`).
+The Akka persistence system is accessed via actions defined in the `EventSourced`  module. These actions can only be used in an *event sourced* actor (i.e. those started using `EventSourced.spawnspawnNoSnapshots` or `EventSourced.spawnSnapshots`).
 
 * `persist`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. The result of `persist` is a `PersistResult` which is either the result of the action, or a lifecycle event (recovery finished, recovery failed, or the result of the simple action was rejected by the persistence system).
 * `persistSimple`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. Just the result of the simple action is returned, persistence lifecycle events are filtered out. If an action result is rejected by the persistence system or recovery fails then the actor will be stopped.
@@ -302,11 +304,26 @@ let rec handle state = EventSourced.actor {
     return! handle newState
 }
     
-let act = Spawn.spawn parent Context.Props.Anonymous (Spawn.eventSourced <| handle "")
+let act = EventSourced.spawnNoSnapshots parent EventSourced.Props.Anonymous (handle "")
 ```
 
-This actor runs the `handleMsg` action in a simple context. It looks for a `string` message, when one is received, the simple action finishes with that string message as its result. The `persist` action that `handleMsg` was running in then persists this message and returns it. `handle` then recurses with the new state. If the actor were to crash then all the calls to `persistSimple` would skip calling `handleMsg` and return the persisted results instead. Once the persisted results are exhausted, `persistSimple` will begin calling `handleMsg` again. 
+This actor runs the `handleMsg` action in a simple context. It looks for a `string` message. When one is received, the simple action finishes with that string message as its result. The `persist` action that `handleMsg` was running in then persists this message and returns it. `handle` then recurses with the new state. If the actor were to crash then all the calls to `persistSimple` would skip calling `handleMsg` and return the persisted results instead. Once the persisted results are exhausted, `persistSimple` will begin calling `handleMsg` again. 
 
 Note that in order to have event sourced actor state survive a process restart, you will have to configure a persistence back-end when starting the actor system. That is beyond the scope of this document.
 
-Also note: WAkka does not currently support checkpointing in the Akka persistence system.
+##### Persistence Ids
+
+By default, the actor path will be used as the persistence id presented to the Akka persistence system. If this is not desired, then the `persistenceId` member of `EventSourced.Props` should be set (`EventSourced.Props.PersistenceId` provides a shortcut to set this and the actor name).
+
+##### Snapshots
+
+If an actor is started with `EventSourced.spawnSnapshots` then it will support persistence snapshots. The difference from `EventSourced.spawnNoSnapshots` is that in addition to passing in an initial action for the actor to execute, a function to handle a snapshot is also passed in. If no snapshot is available, then the initial action is executed. If a snapshot is available, then it is passed to the snapshot handler function which returns the action to execute instead of the initial action.
+
+Snapshots are managed using the following actions (which can only be used if the actor is started using `spawnSnapshots`):
+* `getLastSequenceNumber`: Gets the sequence number of the last event that was persisted.
+* `saveSnapshot`: Saves the given snapshot. Note that snapshots are typed, and all saved snapshots for a given actor must be the same type. `obj` is a valid snapshot type if you need that amount of flexibility in your snapshots. If you need to track that a snapshot succeeded then watch for `Akka.Persistence.SaveSnapshotSuccess` and/or `Akka.Persistence.SaveSnapshotFailure` messages.
+* `deleteEvents`: Delete persisted events up to the given sequence number. This should only be done after saving a snapshot (preferably after receiving a `Akka.Persistence.SaveSnapshotSuccess` since snapshots are saved asynchronously). If you need to track success then watch for `Akka.Persistence.DeleteMessagesSuccess` and/or `Akka.Persistence.DeleteMessagesFailure` messages.
+* `deleteSnapshot`: Delete the snapshot with the given sequence number. If you need to track success then watch for `Akka.Persistence.DeleteSnapshotSuccess` and/or `Akka.Persistence.DeleteSnapshotFailure` messages.
+* `deleteSnapshots`: Delete snapshots that match the given `Akka.Persistence.SnapshotSelectionCriteria`. If you need to track success then watch for `Akka.Persistence.DeleteSnapshotsSuccess` and/or `Akka.Persistence.DeleteSnapshotsFailure` messages.
+
+Note that if you have an actor that is started using `Spawn.eventSourced`, then it is the equivalent of being started with `spawnNoSnapshots` and it will not be able to use snapshots. To upgrade it to an actor that can use snapshots, you will have to change your code to use `spawnSnapshots` when starting the actor. 
