@@ -201,37 +201,6 @@ let ``stop action in perist stops the actor`` () =
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
-let ``restart after stop results in stopped actor`` () =
-    TestKit.testDefault <| fun tk ->
-        let probe = tk.CreateTestProbe "probe"
-
-        let sent num = $"should get this first time({num})"
-
-        let rec handle num =
-            actor {
-                do! persistSimple (Simple.actor {
-                        do! typed probe <! sent num
-                        let! _ = Receive.Any ()
-                        return! stop ()
-                    })
-                do! typed probe <! $"should not get this ({num})"
-                // The actor should stop on the previous line so this message should never be sent
-            }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle 1) (constAction (handle 1))
-
-        tk.Watch (untyped act) |> ignore
-        probe.ExpectMsg (sent 1) |> ignore
-        let m1 = {value = 1234}
-        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
-        tk.ExpectTerminated (untyped act) |> ignore
-        probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
-
-        let act2 = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle 2)  (constAction (handle 2))
-        tk.Watch (untyped act2) |> ignore
-        tk.ExpectTerminated (untyped act2, timeout = TimeSpan.FromSeconds 30.0) |> ignore
-        probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
-
-[<Test>]
 let ``create actor can create an actor`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
@@ -754,6 +723,33 @@ let ``Actor class: isRecovering gives correct results`` () =
         probe.ExpectMsg "Got RecoveryDone" |> ignore
         probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
     
+let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+    act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
+
+[<Test>]
+let ``filter only inside of persist works`` () =
+    //When testing alphas of 1.5.0 we found that using the timeout version of FilterOnly within a call to persistSimple,
+    //the actor would always crash because the filter was not applied and the continuation would try to cast the result
+    //to Option<`Result> instead of `Result. This test is to make sure that this is fixed.
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () =
+            actor {
+                let! msg = persistSimple (Receive.FilterOnly<Msg>(TimeSpan.FromSeconds 10.0, fun msg -> msg.value % 2 = 0))
+                do! ActorRefs.typed probe <! msg
+                return! handle ()
+            }
+        let act = spawnNoSnapshots tk.Sys EventSourcedProps.Anonymous (handle ())
+
+        let otherMsg = "This should be ignored"
+        tell (retype act) otherMsg
+        let m0 = {value = 1}
+        tell (retype act) m0
+        let m1 = {value = 2}
+        tell (retype act) m1
+        probe.ExpectMsg(Some m1) |> ignore        
+
 [<Test>]
 let ``state is recovered when actor starts again with snapshot`` () =
     TestKit.testDefault <| fun tk ->

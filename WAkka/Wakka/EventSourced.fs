@@ -79,8 +79,6 @@ let actor = ActorBuilder ()
 
 module private EventSourcedActorPrivate =
 
-    type Stopped = Stopped
-    
     type PersistenceMsg =
         | Completed
         | Failed of exn * obj
@@ -122,24 +120,16 @@ module Internal =
                     if recovering then
                         msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                     else
-                        handleSubActions next subAction
+                        let onDone res =
+                            rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
+                            this.Persist (res, fun evt -> handleActions false (next evt))
+                        let setMsgHandler (handler: Simple.IMessageHandler) =
+                            msgHandler <- (fun _ m -> handler.HandleMessage m)
+                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
                 | GetRecovering ->
                     handleActions recovering (next recovering)
                 | Snapshot snapshot ->
                     handleActions recovering (handler.HandleSnapshotExtra snapshot this next)
-
-        and handleSubActions cont subAction =
-            match subAction with
-            | Simple.SimpleAction.Done res ->
-                rejectionHandler <- (fun (result, reason, sn) -> handleActions false (cont (Rejected (result, reason, sn) :> obj)))
-                this.Persist (res, fun evt -> handleActions false (cont evt))
-            | Simple.SimpleAction.Stop _ ->
-                rejectionHandler <- (fun _ -> ctx.Stop ctx.Self)
-                this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
-            | Simple.SimpleAction.Simple next ->
-                handleSubActions cont (next this)
-            | Simple.SimpleAction.Extra (_, next) ->
-                msgHandler <- (fun _ msg -> handleSubActions cont (next msg))
 
         do msgHandler <- (fun recovering msg ->
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -168,8 +158,6 @@ module Internal =
                     handleActions true handler.StartAction
                     actionsInitialized <- true
                 msgHandler false (Completed :> obj)
-            | :? EventSourcedActorPrivate.Stopped ->
-                ctx.Stop ctx.Self
             | _ ->
                 if not actionsInitialized then
                     handleActions true handler.StartAction
