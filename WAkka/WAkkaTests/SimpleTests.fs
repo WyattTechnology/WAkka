@@ -169,6 +169,27 @@ let ``receive filter only uses the filter`` ([<ValueSource("actorFunctions")>] m
         probe.ExpectMsg m1 |> ignore        
 
 [<Test>]
+let ``receive filter only uses the filter with timeout`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec handle () =
+            actor {
+                let! msg = Receive.FilterOnly<Msg>(TimeSpan.FromSeconds 10.0,  fun msg -> msg.value % 2 = 0)
+                do! ActorRefs.typed probe <! msg
+                return! handle ()
+            }
+        let act = makeActor tk.Sys Props.Anonymous (handle ())
+
+        let otherMsg = "This should be ignored"
+        tell (retype act) otherMsg
+        let m0 = {value = 1}
+        tell (retype act) m0
+        let m1 = {value = 2}
+        tell (retype act) m1
+        probe.ExpectMsg(Some m1, TimeSpan.FromMinutes 1.0) |> ignore        
+
+[<Test>]
 let ``receive any with timeout will timeout`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"

@@ -47,9 +47,15 @@ type EventSourcedExtra<'Snapshot> =
     | Snapshot of 'Snapshot
     
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
-type EventSourcedAction<'Result, 'Snapshot> = ActionBase<'Result, EventSourcedExtra<'Snapshot>>
+type EventSourcedActionBase<'Result, 'Snapshot> = ActionBase<'Result, EventSourcedExtra<'Snapshot>>
+type NoSnapshotsAction<'Result> = EventSourcedActionBase<'Result, NoSnapshotExtra>
+type SnapshotAction<'Result, 'Snapshot> = EventSourcedActionBase<'Result, SnapshotExtra<'Snapshot>>
 
-let rec private bind (f: 'a -> EventSourcedAction<'b, 's>) (op: EventSourcedAction<'a, 's>) : EventSourcedAction<'b, 's> =
+/// Backwards compatible type alias for EventSourcedActionBase<'Result, NoSnapshotExtra>. Use NoSnapshotAction in
+/// new code instead of this.
+type EventSourcedAction<'Result> = EventSourcedActionBase<'Result, NoSnapshotExtra>
+
+let rec private bind (f: 'a -> EventSourcedActionBase<'b, 's>) (op: EventSourcedActionBase<'a, 's>) : EventSourcedActionBase<'b, 's> =
     bindBase f op
 
 type ActorBuilder () =
@@ -58,7 +64,7 @@ type ActorBuilder () =
     member this.ReturnFrom x = x
     member this.Zero () = Done ()
     member this.Combine(m1, m2) = this.Bind (m1, m2)
-    member this.Delay (f: unit -> EventSourcedAction<'t, 's>): (unit -> EventSourcedAction<'t, 's>) = f
+    member this.Delay (f: unit -> EventSourcedActionBase<'t, 's>): (unit -> EventSourcedActionBase<'t, 's>) = f
     member this.Run f = f ()
     member this.For(values, f) : ActionBase<unit, 't> =
         match Seq.tryHead values with
@@ -73,8 +79,6 @@ let actor = ActorBuilder ()
 
 module private EventSourcedActorPrivate =
 
-    type Stopped = Stopped
-    
     type PersistenceMsg =
         | Completed
         | Failed of exn * obj
@@ -84,9 +88,9 @@ open EventSourcedActorPrivate
 
 module Internal = 
     type IActionHandler<'Snapshot> =
-        abstract member StartAction: EventSourcedAction<unit, 'Snapshot>
-        abstract member SnapshotHandler: obj -> EventSourcedAction<unit, 'Snapshot>
-        abstract member HandleSnapshotExtra: 'Snapshot -> Akka.Persistence.UntypedPersistentActor -> (obj -> EventSourcedAction<'a, 'Snapshot>) -> EventSourcedAction<'a, 'Snapshot>
+        abstract member StartAction: EventSourcedActionBase<unit, 'Snapshot>
+        abstract member SnapshotHandler: obj -> EventSourcedActionBase<unit, 'Snapshot>
+        abstract member HandleSnapshotExtra: 'Snapshot -> Akka.Persistence.UntypedPersistentActor -> (obj -> EventSourcedActionBase<'a, 'Snapshot>) -> EventSourcedActionBase<'a, 'Snapshot>
     
     type EventSourcedActorBase<'Snapshot>(
         persistenceId: Option<string>,
@@ -116,24 +120,16 @@ module Internal =
                     if recovering then
                         msgHandler <- (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                     else
-                        handleSubActions next subAction
+                        let onDone res =
+                            rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
+                            this.Persist (res, fun evt -> handleActions false (next evt))
+                        let setMsgHandler (handler: Simple.IMessageHandler) =
+                            msgHandler <- (fun _ m -> handler.HandleMessage m)
+                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
                 | GetRecovering ->
                     handleActions recovering (next recovering)
                 | Snapshot snapshot ->
                     handleActions recovering (handler.HandleSnapshotExtra snapshot this next)
-
-        and handleSubActions cont subAction =
-            match subAction with
-            | Simple.SimpleAction.Done res ->
-                rejectionHandler <- (fun (result, reason, sn) -> handleActions false (cont (Rejected (result, reason, sn) :> obj)))
-                this.Persist (res, fun evt -> handleActions false (cont evt))
-            | Simple.SimpleAction.Stop _ ->
-                rejectionHandler <- (fun _ -> ctx.Stop ctx.Self)
-                this.Persist(Stopped, fun _ -> ctx.Stop ctx.Self)
-            | Simple.SimpleAction.Simple next ->
-                handleSubActions cont (next this)
-            | Simple.SimpleAction.Extra (_, next) ->
-                msgHandler <- (fun _ msg -> handleSubActions cont (next msg))
 
         do msgHandler <- (fun recovering msg ->
             let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -162,8 +158,6 @@ module Internal =
                     handleActions true handler.StartAction
                     actionsInitialized <- true
                 msgHandler false (Completed :> obj)
-            | :? EventSourcedActorPrivate.Stopped ->
-                ctx.Stop ctx.Self
             | _ ->
                 if not actionsInitialized then
                     handleActions true handler.StartAction
@@ -222,7 +216,7 @@ type private NoSnapshotHandler (startAction) =
 /// can be derived from this class instead.  
 /// </summary>
 /// <param name="startAction">The action for the actor to run.</param>
-type EventSourcedActor(startAction: EventSourcedAction<unit, NoSnapshotExtra>, ?persistenceId) =
+type EventSourcedActor(startAction: EventSourcedActionBase<unit, NoSnapshotExtra>, ?persistenceId) =
     inherit Internal.EventSourcedActorBase<NoSnapshotExtra>(persistenceId, NoSnapshotHandler startAction)
 
 type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
@@ -254,8 +248,8 @@ type private SnapshotHandler<'Snapshot> (startAction, snapshotHandler) =
 /// <param name="startAction">The action for the actor to run.</param>
 /// <param name="snapshotHandler">If a snapshot is offered by the persistence system then it will be passed to this function to generate and initial action to use instead of startAction.</param>
 type EventSourcedSnapshotActor<'Snapshot>(
-    startAction: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>,
-    snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>,
+    startAction: EventSourcedActionBase<unit, SnapshotExtra<'Snapshot>>,
+    snapshotHandler: 'Snapshot -> EventSourcedActionBase<unit, SnapshotExtra<'Snapshot>>,
     ?persistenceId
 ) =
     inherit Internal.EventSourcedActorBase<SnapshotExtra<'Snapshot>>(persistenceId, SnapshotHandler(startAction, snapshotHandler))
@@ -263,11 +257,11 @@ type EventSourcedSnapshotActor<'Snapshot>(
 /// <summary>
 /// The properties for an event sourced actor.
 /// </summary>
-type Props = {
+type EventSourcedProps = {
     /// The persistence id for the actor. If None then the actor's path will be used.
     persistenceId: Option<string>
     /// The common properties for the actor.
-    common: Common.Props
+    common: Props
 }
 with
     /// <summary>
@@ -276,7 +270,7 @@ with
     /// <param name="name">The name for the actor.</param>
     static member Named name = {
         persistenceId = None
-        common = Common.Props.Named name
+        common = Props.Named name
     }
     
     /// <summary>
@@ -284,7 +278,7 @@ with
     /// </summary>
     static member Anonymous = {
         persistenceId = None
-        common = Common.Props.Anonymous
+        common = Props.Anonymous
     }
     
     /// <summary>
@@ -296,8 +290,8 @@ with
         persistenceId = Some id
         common =
             match actorName with
-            | Some n -> Common.Props.Named n
-            | None -> Common.Props.Anonymous 
+            | Some n -> Props.Named n
+            | None -> Props.Anonymous 
     }
     
 /// <summary>
@@ -306,7 +300,7 @@ with
 /// <param name="parent">The parent for the new actor.</param>
 /// <param name="props">The actor's properties.</param>
 /// <param name="action">The action to run.</param>
-let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: Props) (action: EventSourcedAction<unit, NoSnapshotExtra>) =
+let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: EventSourcedProps) (action: EventSourcedActionBase<unit, NoSnapshotExtra>) =
     let applyMod arg modifier current =
         match arg with
         | Some a -> modifier a current
@@ -330,9 +324,9 @@ let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: Props) (actio
 /// <param name="snapshotHandler">Called to generate the action to run based on the given snapshot.</param>
 let spawnSnapshots
     (parent: Akka.Actor.IActorRefFactory)
-    (props: Props)
-    (action: EventSourcedAction<unit, SnapshotExtra<'Snapshot>>)
-    (snapshotHandler: 'Snapshot -> EventSourcedAction<unit, SnapshotExtra<'Snapshot>>)
+    (props: EventSourcedProps)
+    (action: EventSourcedActionBase<unit, SnapshotExtra<'Snapshot>>)
+    (snapshotHandler: 'Snapshot -> EventSourcedActionBase<unit, SnapshotExtra<'Snapshot>>)
     =
     let applyMod arg modifier current =
         match arg with
@@ -351,7 +345,7 @@ let spawnSnapshots
 [<AutoOpen>]
 module Actions =
 
-    let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedAction<obj, 's> =
+    let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedActionBase<obj, 's> =
         Extra (RunAction action, Done)        
     
     /// The result of applying persist to a SimpleAction.
@@ -374,7 +368,7 @@ module Actions =
     /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
     /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
     /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned. 
-    let persist (action: Simple.SimpleAction<'Result>): EventSourcedAction<PersistResult<'Result>, 'Snapshot> =
+    let persist (action: Simple.SimpleAction<'Result>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObj (Simple.actor {
                 let! res = action
@@ -402,7 +396,7 @@ module Actions =
     /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
     /// If a result is produced then it was either read from the event log if recovering or the product of executing the
     /// action if not recovering. Unlike persist, persistSimple will always execute its action.
-    let persistSimple (action: Simple.SimpleAction<'Result>): EventSourcedAction<'Result, 'Snapshot> =
+    let persistSimple (action: Simple.SimpleAction<'Result>): EventSourcedActionBase<'Result, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObj (Simple.actor {
                 let! res = action
@@ -425,12 +419,10 @@ module Actions =
         getEvt ()
 
     /// Gets the recovery state of the actor.
-    let isRecovering () : EventSourcedAction<bool, 'Snapshot> = actor {
+    let isRecovering () : EventSourcedActionBase<bool, 'Snapshot> = actor {
         let! res = Extra(GetRecovering, Done)
         return (res :?> bool)
     }
-    
-    type SnapshotAction<'Result, 'SnapShot> = EventSourcedAction<'Result, SnapshotExtra<'SnapShot>>
     
     /// Gets the sequence number of the last persistence operation.
     let getLastSequenceNumber () : SnapshotAction<int64, 'SnapShot> = actor {
@@ -467,7 +459,7 @@ module Actions =
     }
     
 ///Maps the given function over the given array within an actor expression.
-let mapArray (func: 'a -> EventSourcedAction<'b, 's>) (values: 'a []) : EventSourcedAction<'b [], 's> =
+let mapArray (func: 'a -> EventSourcedActionBase<'b, 's>) (values: 'a []) : EventSourcedActionBase<'b [], 's> =
     let rec loop (results: 'b []) i = ActorBuilder () {
         if i < values.Length then
             let! res = func values[i]
@@ -479,7 +471,7 @@ let mapArray (func: 'a -> EventSourcedAction<'b, 's>) (values: 'a []) : EventSou
     loop (Array.zeroCreate values.Length) 0
 
 ///Maps the given function over the given list within an actor expression.
-let mapList (func: 'a -> EventSourcedAction<'b, 's>) (values: List<'a>) : EventSourcedAction<List<'b>, 's> =
+let mapList (func: 'a -> EventSourcedActionBase<'b, 's>) (values: List<'a>) : EventSourcedActionBase<List<'b>, 's> =
     let rec loop (left: List<'a>) (results: List<'b>) = ActorBuilder () {
         match left with
         | head::tail ->
@@ -491,7 +483,7 @@ let mapList (func: 'a -> EventSourcedAction<'b, 's>) (values: List<'a>) : EventS
     loop values []
 
 ///Folds the given function over the given sequence of actions within an actor expression.
-let foldActions (func: 'a -> 'res -> EventSourcedAction<'res, 's>) (init: 'res) (values: seq<EventSourcedAction<'a, 's>>) : EventSourcedAction<'res, 's> =
+let foldActions (func: 'a -> 'res -> EventSourcedActionBase<'res, 's>) (init: 'res) (values: seq<EventSourcedActionBase<'a, 's>>) : EventSourcedActionBase<'res, 's> =
     let rec loop left cur = actor {
         if Seq.isEmpty left then
             return cur
@@ -503,7 +495,7 @@ let foldActions (func: 'a -> 'res -> EventSourcedAction<'res, 's>) (init: 'res) 
     loop values init
 
 ///Folds the given function over the given sequence within an actor expression.
-let foldValues (func: 'a -> 'res -> EventSourcedAction<'res, 's>) (init: 'res) (values: seq<'a>) : EventSourcedAction<'res, 's> =
+let foldValues (func: 'a -> 'res -> EventSourcedActionBase<'res, 's>) (init: 'res) (values: seq<'a>) : EventSourcedActionBase<'res, 's> =
     let rec loop left cur = ActorBuilder () {
         if Seq.isEmpty left then
             return cur
