@@ -30,9 +30,11 @@
 
 module WAkka.Common
 
+open Akka.Event
+
 /// A logger tied to an actor.
 type Logger internal (ctx: Akka.Actor.IActorContext) =
-    let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+    let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
 
     /// Log the given message at the given level.
     member _.Log level (msg: string) = logger.Log (level, msg)

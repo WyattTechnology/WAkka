@@ -30,6 +30,8 @@
 
 module WAkka.EventSourced
 
+open Akka.Event
+
 open Common
 
 type NoSnapshotExtra = NoSnapshotExtra
@@ -132,7 +134,7 @@ module Internal =
                     handleActions recovering (handler.HandleSnapshotExtra snapshot this next)
 
         do msgHandler <- (fun recovering msg ->
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
         )
         
@@ -144,7 +146,7 @@ module Internal =
             msgHandler false msg
 
         override _.OnPersistRejected(cause, event, sequenceNr) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
             rejectionHandler (event, cause, sequenceNr)
 
@@ -165,12 +167,12 @@ module Internal =
                 msgHandler true msg
 
         override _.OnRecoveryFailure(reason, message) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"recovery failed on message {message}: {reason}"
             msgHandler false (Failed (reason, message) :> obj)
 
         override this.PreRestart(reason, message) =
-            let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Actor crashed on {message}: {reason}"
             restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
             base.PreRestart(reason, message)

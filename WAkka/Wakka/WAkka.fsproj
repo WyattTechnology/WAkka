@@ -1,8 +1,8 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <TargetFrameworks>net48;netstandard2.0;netstandard2.1</TargetFrameworks>
-    <PackageVersion>1.5.0-alpha2</PackageVersion>
+    <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0</TargetFrameworks>
+    <PackageVersion>1.5.0-alpha3</PackageVersion>
     <AssemblyVersion>1.5.0</AssemblyVersion>
     <FileVersion>1.5.0</FileVersion>
     <Authors>Wyatt Technology</Authors>
@@ -17,9 +17,9 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Title>WAkka</Title>
     <Description>Make creating certain types of Akka.NET actors easier in F#.</Description>
-    <Copyright>Copyright (c) Wyatt Technology 2022</Copyright>
+    <Copyright>Copyright (c) Wyatt Technology 2023</Copyright>
     <PackageTags>actors,Akka, akka,concurreny,akka.net,fsharp</PackageTags>
-    <LangVersion>7.0</LangVersion>
+    <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)' == 'Debug' ">
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -36,10 +36,14 @@
     <Compile Include="Spawn.fs" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Akka" Version="1.5.14" />
+    <PackageReference Include="Akka.Persistence" Version="1.5.14" />
+    <PackageReference Include="Akka.Serialization.Hyperion" Version="1.5.14" />
+    <PackageReference Include="Akka.Streams" Version="1.5.14" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
-    <PackageReference Include="Akkling" Version="0.12.0" />
-    <PackageReference Include="Akkling.Persistence" Version="0.12.0" />
-    <PackageReference Update="FSharp.Core" Version="5.0.2" />
+    <PackageReference Include="Akkling" Version="0.13.0" />
+    <PackageReference Include="Akkling.Persistence" Version="0.13.0" />
+    <PackageReference Update="FSharp.Core" Version="8.0.100" />
     <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
   </ItemGroup>
   <ItemGroup>
