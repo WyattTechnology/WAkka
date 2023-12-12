@@ -2,7 +2,7 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0</TargetFrameworks>
-    <PackageVersion>1.5.0-alpha2</PackageVersion>
+    <PackageVersion>1.5.0-alpha3</PackageVersion>
     <AssemblyVersion>1.5.0</AssemblyVersion>
     <FileVersion>1.5.0</FileVersion>
     <Authors>Wyatt Technology</Authors>
@@ -17,7 +17,7 @@
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
     <Title>WAkka</Title>
     <Description>Make creating certain types of Akka.NET actors easier in F#.</Description>
-    <Copyright>Copyright (c) Wyatt Technology 2022</Copyright>
+    <Copyright>Copyright (c) Wyatt Technology 2023</Copyright>
     <PackageTags>actors,Akka, akka,concurreny,akka.net,fsharp</PackageTags>
     <LangVersion>8.0</LangVersion>
   </PropertyGroup>
