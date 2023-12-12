@@ -32,6 +32,8 @@ module WAkka.Simple
 
 open System
 
+open Akka.Event
+
 open Common
 
 type SimpleType internal () = class end
@@ -115,7 +117,7 @@ let internal handleSimpleActions (
         try
             Ok (func ())
         with
-        | err -> Error err
+        | err -> Result.Error err
     let tryNextAction body okHandler errorHandler =
         match convertExnToResult body with
         | Ok action ->
@@ -191,7 +193,7 @@ let internal handleSimpleActions (
             | Error err ->
                 match convertExnToResult (fun () -> handler err) with
                 | Ok action -> handleException cont action
-                | Error err -> cont (Error err)
+                | Error err -> cont (Result.Error err)
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
@@ -202,7 +204,7 @@ let internal handleSimpleActions (
                     tryNextAction
                         (fun () -> newHandler err)
                         (handleException cont')
-                        (Error >> cont')
+                        (Result.Error >> cont')
                 tryNextAction
                     body
                     (handleTryWith cont' newHandler)
@@ -211,7 +213,7 @@ let internal handleSimpleActions (
                 let cont' = makeNewCont next
                 let handleError err =
                     runFinally newHandler
-                    cont' (Error err)
+                    cont' (Result.Error err)
                 tryNextAction
                     body
                     (handleTryFinally cont' newHandler)
@@ -223,9 +225,9 @@ let internal handleSimpleActions (
             | Ok result ->
                 match convertExnToResult (fun () -> next result) with
                 | Ok action -> handleException cont action
-                | Error err -> cont (Error err)
+                | Error err -> cont (Result.Error err)
             | Error err ->
-                cont (Error err)
+                cont (Result.Error err)
         match action with
         | Done result ->
             cont (Ok result)
@@ -236,10 +238,10 @@ let internal handleSimpleActions (
                 try
                     Ok (next actionCtx)
                 with
-                | err -> Error err
+                | err -> Result.Error err
             match nextRes with
             | Ok action -> handleException cont action
-            | Error err -> cont (Error err)
+            | Error err -> cont (Result.Error err)
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
@@ -250,7 +252,7 @@ let internal handleSimpleActions (
                     tryNextAction
                         (fun () -> handler err)
                         (handleException cont)
-                        (Error >> cont)
+                        (Result.Error >> cont)
                 tryNextAction
                     body
                     (handleTryWith cont' handler)
@@ -259,7 +261,7 @@ let internal handleSimpleActions (
                 let cont' = makeNewCont next
                 let handleError err =
                     runFinally newHandler
-                    cont' (Error err)
+                    cont' (Result.Error err)
                 tryNextAction
                     body
                     (handleTryFinally cont' newHandler)
@@ -268,7 +270,7 @@ let internal handleSimpleActions (
     and handleTryFinally (cont: TryWithResult -> unit) (handler: unit -> unit) (action: SimpleAction<obj>) =
         let handleError err =
             runFinally handler
-            cont (Error err)
+            cont (Result.Error err)
         let makeNewCont next res =
             let res' = res |> Result.bind (fun result ->
                 convertExnToResult (fun () -> next result)
@@ -300,7 +302,7 @@ let internal handleSimpleActions (
                     tryNextAction
                         (fun () -> newHandler err)
                         (handleException cont')
-                        (Error >> cont')
+                        (Result.Error >> cont')
                 tryNextAction
                     body
                     (handleTryWith cont' newHandler)
@@ -312,7 +314,7 @@ let internal handleSimpleActions (
                     (handleTryFinally cont' newHandler)
                     (fun err ->
                         runFinally newHandler
-                        cont' (Error err)
+                        cont' (Result.Error err)
                     )
     
     handleActions startAction
@@ -369,7 +371,7 @@ type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
     override _.OnReceive (msg: obj) = msgHandler.HandleMessage msg
 
     override _.PreRestart(err: exn, msg: obj) =
-        let logger = Akka.Event.Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+        let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
         logger.Error $"Actor restarting after message {msg}: {err}"
         restartHandlers.ExecuteHandlers (this :> IActorContext, msg, err)
         let startMsg : SimpleActorPrivate.Start = 
