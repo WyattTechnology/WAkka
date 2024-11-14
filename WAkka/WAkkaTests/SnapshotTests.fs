@@ -755,15 +755,24 @@ let ``state is recovered when actor starts again with snapshot`` () =
     TestKit.testDefault <| fun tk ->
         let cur = Environment.CurrentDirectory
         IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let snapshotted = tk.CreateTestProbe "snapshot"
         let action initState = actor {
             let rec inner state = Simple.actor {
-                match! Receive.Only<string>() with
-                | "get" ->
-                    let! sender = getSender()
-                    do! sender <! state
+                match! Receive.Any() with
+                | :? string as s ->
+                    match s with 
+                    | "get" ->
+                        let! sender = getSender()
+                        do! sender <! state
+                        return! inner state
+                    | add ->
+                        return add
+                | :? Akka.Persistence.SaveSnapshotSuccess as snap ->
+                    if snap.Metadata.SequenceNr = 3 then
+                        tellNow (typed snapshotted) "done"
                     return! inner state
-                | add ->
-                    return add
+                | _other ->
+                    return! inner state
             }
             let rec outer state = actor {
                 let! add = persistSimple (inner state)
@@ -783,8 +792,10 @@ let ``state is recovered when actor starts again with snapshot`` () =
         tellNow act1 "1"
         tellNow act1 "2"
         tellNow act1 "3"
-        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 50000.0)) |> Async.RunSynchronously
         res1 |> shouldEqual "123"
+        // Need to wait for last snapshot serialization to finish before killing actor 
+        snapshotted.ExpectMsg "done" |> ignore
         tk.Watch (untyped act1) |> ignore
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
