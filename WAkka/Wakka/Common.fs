@@ -76,11 +76,11 @@ type IActorContext =
     /// Get an actor selection for the given actor path.
     abstract member ActorSelection: Akka.Actor.ActorPath -> Akka.Actor.ActorSelection
 
-/// A function the can be passed to the setRestartHandler action. The function is passed the actor context, the message
+/// A function that can be passed to the setRestartHandler action. The function is passed the actor context, the message
 /// that was being processed when the crash happened, and the exception that caused the crash.
 type RestartHandler = IActorContext * obj * exn -> unit
 
-/// A function the can be passed to the setPostStopHandler action. The function is passed the actor context.
+/// A function that can be passed to the setPostStopHandler action. The function is passed the actor context.
 type StopHandler = IActorContext -> unit
 
 type internal IActionContext =
@@ -104,7 +104,7 @@ type Props = {
     deploy: Option<Akka.Actor.Deploy>
     /// Specifies an alternate router type.
     router: Option<Akka.Routing.RouterConfig>
-    /// Specifies an alternate supervision strategy type for this actors children.
+    /// Specifies an alternate supervision strategy type for this actor's children.
     supervisionStrategy: Option<Akka.Actor.SupervisorStrategy>
 }
 with
@@ -169,8 +169,8 @@ module CommonActions =
 
     /// Stops this actor.
     let stop () =
-        // This weird dance is here so that the result of stop can adapt to the context that is it called in and
-        // we dont have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
+        // This weird dance is here so that the result of stop can adapt to the context that it is called in, and
+        // we don't have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
         // Action<'Result, 'a> is expected and 'Result is not unit.
         bindBase (fun () -> Done Unchecked.defaultof<'Result>) (Stop Done)
 
@@ -179,7 +179,7 @@ module CommonActions =
     let createChild (make: Akka.Actor.IActorRefFactory -> 'Result) =
         Simple (fun ctx -> Done (make ctx.ActorFactory))
 
-    /// Sends a the given message to the given actor. Also see the "<!" operator.
+    /// Sends the given message to the given actor. Also see the "<!" operator.
     let send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
 
     /// Watches the given actor for termination with this actor.

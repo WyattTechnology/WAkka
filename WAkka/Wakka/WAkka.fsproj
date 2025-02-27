@@ -46,7 +46,4 @@
     <PackageReference Update="FSharp.Core" Version="8.0.403" />
     <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="../../readme.md" Pack="true" PackagePath="\" />
-  </ItemGroup>
 </Project>

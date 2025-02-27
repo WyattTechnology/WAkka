@@ -280,7 +280,7 @@ The `ActorResult` module contains more functions to make working with this CE ea
 
 #### Event sourced actions
 
-The Akka persistence system is accessed via actions defined in the `EventSourced`  module. These actions can only be used in an *event sourced* actor (i.e. those started using `EventSourced.spawnspawnNoSnapshots` or `EventSourced.spawnSnapshots`).
+The Akka persistence system is accessed via actions defined in the `EventSourced`  module. These actions can only be used in an *event sourced* actor (i.e. those started using `EventSourced.spawnNoSnapshots` or `EventSourced.spawnSnapshots`).
 
 * `persist`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. The result of `persist` is a `PersistResult` which is either the result of the action, or a lifecycle event (recovery finished, recovery failed, or the result of the simple action was rejected by the persistence system).
 * `persistSimple`: Run the given simple action and persist the result. When the actor is recovering from a crash the simple action is skipped and the persisted result is returned. Just the result of the simple action is returned, persistence lifecycle events are filtered out. If an action result is rejected by the persistence system or recovery fails then the actor will be stopped.

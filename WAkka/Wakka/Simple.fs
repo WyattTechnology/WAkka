@@ -564,7 +564,7 @@ module Actions =
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
     /// Unstashes the message at the front of the stash.
     let unstashOne () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-    /// Unstashes all of the messages in the stash.
+    /// Unstashes all the messages in the stash.
     let unstashAll () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
 
     /// Strategy for dealing with "other messages" when using receive and sleep methods.

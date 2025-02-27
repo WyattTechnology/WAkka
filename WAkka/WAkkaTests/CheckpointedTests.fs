@@ -37,7 +37,7 @@ open Akkling
 open WAkka.Common
 open WAkka.Simple
 
-let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+let tell (act: IActorRef<'Msg>) (msg: 'Msg) =
     act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
 
 type CrashMsg = {
@@ -56,7 +56,7 @@ let ``state is recovered after a crash`` () =
             match! Receive.Any () with
             | :? string as msg ->
                 let newRecved = msg :: recved
-                do! ActorRefs.typed probe <! String.concat "," newRecved
+                do! typed probe <! String.concat "," newRecved
                 return! crashHandle newRecved
             | :? CrashIt ->
                 failwith "crashing"
@@ -80,7 +80,7 @@ let ``state is recovered after a crash`` () =
                 createChild (fun f ->
                     spawnCheckpointed f (Props.Named "crasher") crashStart
                 )
-            do! ActorRefs.typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
@@ -89,7 +89,7 @@ let ``state is recovered after a crash`` () =
         }
         let _parent = spawnCheckpointed tk.Sys parentProps start
 
-        let crasher : ActorRefs.IActorRef<string> = ActorRefs.retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"
         tell crasher msg1
         probe.ExpectMsg msg1 |> ignore
