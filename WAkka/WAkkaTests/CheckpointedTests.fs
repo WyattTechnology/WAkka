@@ -63,7 +63,7 @@ let ``state is recovered after a crash`` () =
             | _ ->
                 return! crashHandle recved
         }
-        let crashStart = actor {
+        let crashStart () = actor {
             let! _ = setRestartHandler (fun (_ctx, msg, err) ->
                 tell (typed probe) {msg = msg; err = err}
             )
@@ -75,10 +75,10 @@ let ``state is recovered after a crash`` () =
             return! handle ()
         }
 
-        let start = actor {
+        let start () = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawnCheckpointed f (Props.Named "crasher") crashStart
+                    Spawn.Checkpointed(f, Props.Named "crasher", crashStart)
                 )
             do! typed probe <! crasher
             return! handle ()
@@ -87,7 +87,7 @@ let ``state is recovered after a crash`` () =
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = spawnCheckpointed tk.Sys parentProps start
+        let _parent = Spawn.Checkpointed(tk.Sys, parentProps, start)
 
         let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"

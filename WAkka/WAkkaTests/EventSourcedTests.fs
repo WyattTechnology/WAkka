@@ -596,7 +596,7 @@ let ``state is recovered after a crash`` () =
             return! crashHandle []
         }
 
-        let start = Simple.actor {
+        let start () = Simple.actor {
             let! crasher =
                 createChild (fun f ->
                     Spawn.NoSnapshots(f, EventSourcedProps.Named "crasher", crashStart)
@@ -609,7 +609,7 @@ let ``state is recovered after a crash`` () =
             Common.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
+        let _parent = Simple.Spawn.NotPersisted(tk.Sys, parentProps, start)
 
         let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         events.ExpectMsg PersistResult<List<string>>.RecoveryDone |> ignore
@@ -652,7 +652,7 @@ let ``state is recovered after a crash with simple persist`` () =
             return! crashHandle []
         }
 
-        let start = Simple.actor {
+        let start () = Simple.actor {
             let! crasher =
                 createChild (fun f ->
                     Spawn.NoSnapshots(f, EventSourcedProps.Named "crasher", crashStart)
@@ -665,7 +665,7 @@ let ``state is recovered after a crash with simple persist`` () =
             Common.Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
+        let _parent = Simple.Spawn.NotPersisted(tk.Sys, parentProps, start)
 
         let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"

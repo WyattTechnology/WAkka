@@ -39,9 +39,9 @@ open WAkka.Common
 open WAkka.Simple
 open WAkka.ActorResult
 
-type ActorFunction = Akka.Actor.IActorRefFactory -> Props -> SimpleAction<unit> -> IActorRef<obj>
+type ActorFunction = Akka.Actor.IActorRefFactory * Props * (unit -> SimpleAction<unit>) -> IActorRef<obj>
 let actorFunctions : ActorFunction [] =
-    [|spawnNotPersisted; spawnCheckpointed|]
+    [|Spawn.NotPersisted; Spawn.Checkpointed|]
 
 [<Test>]
 let ``actor result: computation expression`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
@@ -49,23 +49,27 @@ let ``actor result: computation expression`` ([<ValueSource("actorFunctions")>] 
         let probe = tk.CreateTestProbe "probe"
 
         let act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                        let rec loop () =
-                                                            actor {
-                                                                let! res =
-                                                                    runActorResult (
-                                                                        actorResult {
-                                                                            let! msg1 = Receive.Only<Result<int, string>> ()
-                                                                            do! ActorResult.ofActor ((typed probe) <! "intermediate message")
-                                                                            let! msg2 = Receive.Only<Result<int, string>> ()
-                                                                            return msg1 + msg2
-                                                                        }
-                                                                    )
-                                                                do! typed probe <! res
-                                                                return! loop ()
-                                                            }
-                                                        loop ()
-                                                    )
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () ->
+                    let rec loop () =
+                        actor {
+                            let! res =
+                                runActorResult (
+                                    actorResult {
+                                        let! msg1 = Receive.Only<Result<int, string>> ()
+                                        do! ActorResult.ofActor ((typed probe) <! "intermediate message")
+                                        let! msg2 = Receive.Only<Result<int, string>> ()
+                                        return msg1 + msg2
+                                    }
+                                )
+                            do! typed probe <! res
+                            return! loop ()
+                        }
+                    loop ()
+                )
+            )
 
         tellNow (retype act) (Result<int, string>.Ok 1)
         probe.ExpectMsg "intermediate message" |> ignore
@@ -86,17 +90,21 @@ let ``actor result: orElse`` ([<ValueSource("actorFunctions")>] makeActor:  Acto
         let probe = tk.CreateTestProbe "probe"
 
         let act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                        let rec loop () =
-                                                            actor {
-                                                                let! res =
-                                                                    Receive.Only<Result<int, string>> ()
-                                                                    |> ActorResult.orElse (Receive.Only<Result<int, string>> ())
-                                                                do! typed probe <! res
-                                                                return! loop ()
-                                                            }
-                                                        loop ()
-                                                    )
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () ->
+                    let rec loop () =
+                        actor {
+                            let! res =
+                                Receive.Only<Result<int, string>> ()
+                                |> ActorResult.orElse (Receive.Only<Result<int, string>> ())
+                            do! typed probe <! res
+                            return! loop ()
+                        }
+                    loop ()
+                )
+            )
 
         tellNow (retype act) (Result<int, string>.Ok 1)
         probe.ExpectMsg (Result<int, string>.Ok 1) |> ignore
@@ -115,19 +123,23 @@ let ``actor result: orElseWith`` ([<ValueSource("actorFunctions")>] makeActor:  
         let probe = tk.CreateTestProbe "probe"
 
         let act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                         let rec loop () = actor {
-                                                             let! res =
-                                                                 Receive.Only<Result<int, string>> ()
-                                                                 |> ActorResult.orElseWith (fun err1 ->
-                                                                     tellNow (typed probe) err1
-                                                                     Receive.Only<Result<int, string>> ()
-                                                                 )
-                                                             do! typed probe <! res
-                                                             return! loop ()
-                                                         }
-                                                         loop ()
-                                                     )
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () -> 
+                     let rec loop () = actor {
+                         let! res =
+                             Receive.Only<Result<int, string>> ()
+                             |> ActorResult.orElseWith (fun err1 ->
+                                 tellNow (typed probe) err1
+                                 Receive.Only<Result<int, string>> ()
+                             )
+                         do! typed probe <! res
+                         return! loop ()
+                     }
+                     loop ()
+                )
+            )
 
         tellNow (retype act) (Result<int, string>.Ok 1)
         probe.ExpectMsg (Result<int, string>.Ok 1) |> ignore
@@ -148,15 +160,19 @@ let ``actor result: ignore`` ([<ValueSource("actorFunctions")>] makeActor:  Acto
         let probe = tk.CreateTestProbe "probe"
 
         let act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                         let rec loop () = actor {
-                                                             let! msg = Receive.Only<Result<string, string>> () |> ActorResult.ignore
-                                                             do! typed probe <! msg
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () ->
+                     let rec loop () = actor {
+                         let! msg = Receive.Only<Result<string, string>> () |> ActorResult.ignore
+                         do! typed probe <! msg
 
-                                                             return! loop ()
-                                                         }
-                                                         loop ()
-                                                     )
+                         return! loop ()
+                     }
+                     loop ()
+                 )
+            )
 
         tellNow (retype act) (Result<string, string>.Ok "")
         probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -169,16 +185,19 @@ let testRequire makeActor require test =
         let probe = tk.CreateTestProbe "probe"
 
         let act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                         let rec loop () = actor {
-                                                             let! msg = require
-                                                             do! typed probe <! msg
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () ->
+                     let rec loop () = actor {
+                         let! msg = require
+                         do! typed probe <! msg
 
-                                                             return! loop ()
-                                                         }
-                                                         loop ()
-                                                     )
-
+                         return! loop ()
+                     }
+                     loop ()
+                 )
+            )
         test act probe
 
 [<Test>]
@@ -309,12 +328,15 @@ let ``actor result: ofResult`` ([<ValueSource("actorFunctions")>] makeActor:  Ac
         let probe = tk.CreateTestProbe "probe"
 
         let _act =
-            makeActor tk.Sys (Props.Named "ce-test") (
-                                                         actor {
-                                                             let! msg = Ok 1 |> ActorResult.ofResult
-                                                             do! typed probe <! msg
-                                                         }
-                                                     )
-
+            makeActor(
+                tk.Sys,
+                Props.Named "ce-test",
+                (fun () -> 
+                     actor {
+                         let! msg = Ok 1 |> ActorResult.ofResult
+                         do! typed probe <! msg
+                     }
+                 )
+            )
         probe.ExpectMsg (Result<int, obj>.Ok 1) |> ignore
 
