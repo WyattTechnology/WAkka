@@ -587,7 +587,8 @@ module Actions =
     }
     
     /// <summary>
-    /// A snapshot result handler for use with Spawn.WithSnapshots.
+    /// A snapshot result handler for use with addSnapshotResultHandler. Create an instance and pass its Handle method
+    /// to addSnapshotResultHandler.
     /// </summary>
     /// <param name="deletePriorMessages">
     /// If true, then on snapshot success, all persisted messages prior to the snapshot are deleted.
