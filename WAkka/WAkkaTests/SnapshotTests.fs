@@ -32,6 +32,7 @@ module WAkkaTests.SnapshotTests
 
 open System
 
+open Akka.Persistence.TestKit
 open NUnit.Framework
 open FsUnitTyped
 
@@ -63,7 +64,7 @@ let ``spawn with name`` () =
                         handle ()
                     )
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
         
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
@@ -94,7 +95,7 @@ let ``spawn with no name`` () =
                         handle ()
                     )
             }
-        let act = spawnSnapshots tk.Sys EventSourcedProps.Anonymous start (constAction start)
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Anonymous, constAction start)
 
         let m1 = {value = 1234}
         act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
@@ -117,7 +118,7 @@ let ``get actor gives correct actor ref`` () =
                 let! act = getActor ()
                 do! typed probe <! act
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ()) (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         probe.ExpectMsg act |> ignore
 
@@ -129,9 +130,9 @@ let ``map gives the correct result`` () =
         let rec handle () =
             actor {
                 let! act = getActor () |> mapResult (fun a -> Result<IActorRef<obj>, unit>.Ok a)
-                do! ActorRefs.typed probe <! act
+                do! typed probe <! act
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ())  (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         let expected : Result<IActorRef<obj>, unit> = Ok act
         probe.ExpectMsg expected |> ignore
@@ -146,7 +147,7 @@ let ``get actor context gives correct actor`` () =
                 let! act = unsafeGetActorCtx ()
                 do! typed probe <! act.Self
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ()) (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -168,7 +169,7 @@ let ``stop action calls stop handlers and stops the actor`` () =
                 // The actor should stop on the previous line so this message should never be sent
                 do! typed probe <! "should not get this"
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ()) (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -178,7 +179,7 @@ let ``stop action calls stop handlers and stops the actor`` () =
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
 
 [<Test>]
-let ``stop action in perist stops the actor`` () =
+let ``stop action in persist stops the actor`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -192,7 +193,7 @@ let ``stop action in perist stops the actor`` () =
                 })
                 // The actor should stop on the previous line so this message should never be sent
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ()) (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -212,13 +213,13 @@ let ``create actor can create an actor`` () =
         let rec handle () =
             actor {
                 let! _newAct = createChild (fun parent ->
-                    spawnSnapshots parent EventSourcedProps.Anonymous child (constAction child)
+                    Spawn.WithSnapshots(parent, EventSourcedProps.Anonymous, constAction child)
                 )
                 let! _ = persistSimple(Receive.Any ())
                 return! handle ()
             }
-        let _act : ActorRefs.IActorRef<Msg> =
-            spawnSnapshots tk.Sys (EventSourcedProps.Named "snap-test-1") (handle ()) (constAction (handle ()))
+        let _act : IActorRef<Msg> =
+            Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "snap-test-1", constAction (handle ()))
 
         probe.ExpectMsg("created") |> ignore
 
@@ -231,12 +232,12 @@ let ``watch works`` () =
             let! _ = persistSimple(Receive.Only<string> ())
             return ()
         }
-        let watched = spawnSnapshots tk.Sys (EventSourcedProps.Named "watched") (otherActor ())  (constAction (otherActor ()))
+        let watched = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "watched", constAction (otherActor ()))
 
         let rec handle () =
             actor {
                 match! persistSimple(Receive.Any ()) with
-                | MessagePatterns.Terminated (act, _, _) ->
+                | Terminated (act, _, _) ->
                     do! typed probe <!  act
                     return! stop ()
                 | _msg ->
@@ -247,7 +248,7 @@ let ``watch works`` () =
             do! typed probe <! ""
             return! handle ()
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg "" |> ignore
         (retype watched).Tell("", Akka.Actor.ActorRefs.NoSender)
@@ -262,7 +263,7 @@ let ``unwatch works`` () =
             let! _ = persistSimple(Receive.Only<string> ())
             return ()
         }
-        let watched = spawnSnapshots tk.Sys (EventSourcedProps.Named "watched") (otherActor ()) (constAction (otherActor ()))
+        let watched = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "watched", constAction (otherActor ()))
 
         let rec handle () =
             actor {
@@ -272,7 +273,7 @@ let ``unwatch works`` () =
                     do! unwatch watched
                     do! typed probe <! "unwatched"
                     return! handle ()
-                | MessagePatterns.Terminated (act, _, _) ->
+                | Terminated (act, _, _) ->
                     do! typed probe <!  act
                     return! stop ()
                 | _msg ->
@@ -283,7 +284,7 @@ let ``unwatch works`` () =
             do! typed probe <! "watched"
             return! handle ()
         }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg "watched" |> ignore
         (retype act).Tell("", Akka.Actor.ActorRefs.NoSender)
@@ -306,7 +307,7 @@ let ``schedule works`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -334,7 +335,7 @@ let ``scheduled messages can be cancelled`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -360,7 +361,7 @@ let ``schedule repeatedly works`` () =
             do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -382,7 +383,7 @@ let ``schedule repeatedly works`` () =
         probe.ExpectMsg "message" |> ignore
 
 [<Test>]
-let ``get sender get's the correct actor`` () =
+let ``get sender gets the correct actor`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -392,16 +393,16 @@ let ``get sender get's the correct actor`` () =
                     let! _ = Receive.Only<string> ()
                     return! getSender ()
                 })
-                do! typed probe <! ActorRefs.untyped sender
+                do! typed probe <! untyped sender
                 return! handle ()
             }
-        let act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") (handle ()) (constAction (handle ()))
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction (handle ()))
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
 
 [<Test>]
-let ``select get's the correct selection`` () =
+let ``select gets the correct selection`` () =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -412,7 +413,7 @@ let ``select get's the correct selection`` () =
             let! selection = select path
             do! typed probe <! selection
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -429,7 +430,7 @@ let ``for loop runs expected number of times`` () =
             do! typed probe <! "done"
         }
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         for i in indexes do
             probe.ExpectMsg $"{i}" |> ignore
@@ -445,7 +446,7 @@ let ``map array process all elements`` () =
             let! res =  [|1; 2; 3|] |> mapArray (fun i -> actor{return (i + 1)})
             do! typed probe <! res
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg [|2; 3; 4|] |> ignore
 
@@ -458,7 +459,7 @@ let ``map list process all elements`` () =
             let! res =  [1; 2; 3] |> mapList (fun i -> actor{return (i + 1)})
             do! typed probe <! res
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg [2; 3; 4] |> ignore
 
@@ -473,7 +474,7 @@ let ``foldActions processes all elements`` () =
             let! res =  (0, actions) ||> foldActions (fun i r -> actor{return (r + i)})
             do! typed probe <! res
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg (List.sum values) |> ignore
 
@@ -487,7 +488,7 @@ let ``foldValues processes all elements`` () =
             let! res =  (0, values) ||> foldValues (fun i r -> actor{return (r + i)})
             do! typed probe <! res
         }
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") start (constAction start)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction start)
 
         probe.ExpectMsg (List.sum values) |> ignore
 
@@ -511,7 +512,7 @@ let ``state is recovered when actor starts again using custom persistence id`` (
             return! outer ""
         }
         
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("test-id", actorName = "act1")) action  (constAction action)
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("test-id", actorName = "act1"), constAction action)
         tellNow act1 "1"
         tellNow act1 "2"
         tellNow act1 "3"
@@ -521,7 +522,7 @@ let ``state is recovered when actor starts again using custom persistence id`` (
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let act2 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("test-id", "act2")) action  (constAction action)
+        let act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("test-id", "act2"), constAction action)
         let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
         res2 |> shouldEqual "123"
         
@@ -545,7 +546,7 @@ let ``state is recovered when actor starts again using default persistence id`` 
             return! outer ""
         }
         
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.Named "test-id") action (constAction action)
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test-id", constAction action)
         tellNow act1 "1"
         tellNow act1 "2"
         tellNow act1 "3"
@@ -555,7 +556,7 @@ let ``state is recovered when actor starts again using default persistence id`` 
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let act2 = spawnSnapshots tk.Sys (EventSourcedProps.Named "test-id") action (constAction action)
+        let act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test-id", constAction action)
         let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
         res2 |> shouldEqual "123"
         
@@ -601,7 +602,7 @@ let ``state is recovered after a crash`` () =
         let start = Simple.actor {
             let! crasher =
                 createChild (fun f ->
-                    spawnSnapshots f (EventSourcedProps.Named "crasher") crashStart (constAction crashStart)
+                    Spawn.WithSnapshots(f, EventSourcedProps.Named "crasher", constAction crashStart)
                 )
             do! typed probe <! crasher
             let! _ = Receive.Any ()
@@ -613,7 +614,7 @@ let ``state is recovered after a crash`` () =
         }
         let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
 
-        let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         events.ExpectMsg PersistResult<List<string>>.RecoveryDone |> ignore
         let msg1 = "1"
         crasher.Tell(msg1, Akka.Actor.ActorRefs.NoSender)
@@ -657,7 +658,7 @@ let ``state is recovered after a crash with simple persist`` () =
         let start = Simple.actor {
             let! crasher =
                 createChild (fun f ->
-                    spawnSnapshots f (EventSourcedProps.Named "crasher") crashStart (constAction crashStart)
+                    Spawn.WithSnapshots(f, EventSourcedProps.Named "crasher", constAction crashStart)
                 )
             do! typed probe <! crasher
             let! _ = Receive.Any ()
@@ -669,7 +670,7 @@ let ``state is recovered after a crash with simple persist`` () =
         }
         let _parent = Simple.spawnNotPersisted tk.Sys parentProps start
 
-        let crasher : ActorRefs.IActorRef<string> = retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"
         crasher.Tell(msg1, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg msg1 |> ignore
@@ -702,13 +703,13 @@ let ``isRecovering gives correct results`` () =
         let probe = tk.CreateTestProbe "probe"
         
         let action = recoveryTestAction (typed probe)
-        let _act = spawnSnapshots tk.Sys (EventSourcedProps.Named "test") action (constAction action)
+        let _act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", constAction action)
 
         probe.ExpectMsg "Was recovering at start" |> ignore
         probe.ExpectMsg "Got RecoveryDone" |> ignore
         probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
 
-type TestActorClass (recv: IActorRef<string>) = inherit EventSourcedSnapshotActor<obj> (recoveryTestAction recv, constAction (recoveryTestAction recv))
+type TestActorClass (recv: IActorRef<string>) = inherit EventSourcedSnapshotActor<obj> (constAction (recoveryTestAction recv))
 
 [<Test>]
 let ``Actor class: isRecovering gives correct results`` () =
@@ -723,7 +724,7 @@ let ``Actor class: isRecovering gives correct results`` () =
         probe.ExpectMsg "Got RecoveryDone" |> ignore
         probe.ExpectMsg "Was not recovering after RecoveryDone" |> ignore
     
-let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+let tell (act: IActorRef<'Msg>) (msg: 'Msg) =
     act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
 
 [<Test>]
@@ -737,10 +738,10 @@ let ``filter only inside of persist works`` () =
         let rec handle () =
             actor {
                 let! msg = persistSimple (Receive.FilterOnly<Msg>(TimeSpan.FromSeconds 10.0, fun msg -> msg.value % 2 = 0))
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
-        let act = spawnNoSnapshots tk.Sys EventSourcedProps.Anonymous (handle ())
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Anonymous, constAction (handle ()))
 
         let otherMsg = "This should be ignored"
         tell (retype act) otherMsg
@@ -785,9 +786,13 @@ let ``state is recovered when actor starts again with snapshot`` () =
         
         let probe = tk.CreateTestProbe "probe"
         let handleSnapshot state =
-            tellNow (typed probe) state
-            action state
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("snapshot-id", actorName = "act1")) (action "") handleSnapshot
+            match state with
+            | Some s -> 
+                tellNow (typed probe) s
+                action s
+            | None ->
+                action ""
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-id", actorName = "act1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
         tellNow act1 "1"
         tellNow act1 "2"
@@ -800,7 +805,7 @@ let ``state is recovered when actor starts again with snapshot`` () =
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let act2 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("snapshot-id", "act2")) (action "") handleSnapshot
+        let act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-id", actorName = "act2"), handleSnapshot)
         probe.ExpectMsg "123" |> ignore
         let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
         res2 |> shouldEqual "123"
@@ -832,9 +837,13 @@ let ``message are deleted by delete messages`` () =
         
         let probe = tk.CreateTestProbe "probe"
         let handleSnapshot state =
-            tellNow (typed probe) state
-            action state
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-events-id", actorName = "act1")) (action "") handleSnapshot
+            match state with
+            | Some s -> 
+                tellNow (typed probe) s
+                action s
+            | None ->
+                action ""
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-events-id", actorName = "act1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
         tellNow act1 "1"
         tellNow act1 "2"
@@ -845,14 +854,14 @@ let ``message are deleted by delete messages`` () =
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let act2 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-events-id", "act2")) (action "") handleSnapshot
+        let act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-events-id", actorName = "act2"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
         let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
         res2 |> shouldEqual ""
 
 type DeleteSnapMsg =
     | Add of string
-    | DeleteSnap
+    | DeleteSnap of sequenceNr:int64
     
 [<Test>]
 let ``snapshots are deleted by delete snapshot`` () =
@@ -871,8 +880,8 @@ let ``snapshots are deleted by delete snapshot`` () =
                         return! inner state
                     | add ->
                         return Add add
-                | :? Akka.Persistence.SaveSnapshotSuccess ->
-                    return DeleteSnap
+                | :? Akka.Persistence.SaveSnapshotSuccess as success ->
+                    return DeleteSnap success.Metadata.SequenceNr
                 | _other ->
                     return! inner state
             }
@@ -883,11 +892,10 @@ let ``snapshots are deleted by delete snapshot`` () =
                     let newState = state + add
                     do! saveSnapshot newState
                     return! outer newState
-                | DeleteSnap ->
+                | DeleteSnap seqNum ->
                     let! isRecovering = isRecovering()
                     if not isRecovering then 
-                        let! seqNum = getLastSequenceNumber()
-                        do! deleteSnapshot (seqNum - 1L)
+                        do! deleteSnapshot seqNum
                         do! typed del <! "deleted"
                     return! outer state
             }
@@ -896,9 +904,13 @@ let ``snapshots are deleted by delete snapshot`` () =
         
         let probe = tk.CreateTestProbe "probe"
         let handleSnapshot state =
-            tellNow (typed probe) state
-            action state
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act1-1")) (action "") handleSnapshot
+            match state with
+            | Some s -> 
+                tellNow (typed probe) s
+                action s
+            | None ->
+                action ""
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act1-1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
         tellNow act1 "1"
         let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
@@ -908,7 +920,7 @@ let ``snapshots are deleted by delete snapshot`` () =
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let _act2 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-snapshot1-id", "act2-1")) (action "") handleSnapshot
+        let _act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act2-1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
 
 [<Test>]
@@ -928,8 +940,8 @@ let ``snapshots are deleted by delete snapshots`` () =
                         return! inner state
                     | add ->
                         return Add add
-                | :? Akka.Persistence.SaveSnapshotSuccess ->
-                    return DeleteSnap
+                | :? Akka.Persistence.SaveSnapshotSuccess as success ->
+                    return DeleteSnap success.Metadata.SequenceNr
                 | _other ->
                     return! inner state
             }
@@ -940,22 +952,24 @@ let ``snapshots are deleted by delete snapshots`` () =
                     let newState = state + add
                     do! saveSnapshot newState
                     return! outer newState
-                | DeleteSnap ->
+                | DeleteSnap seqNum ->
                     let! isRecovering = isRecovering()
                     if not isRecovering then 
-                        let! seqNum = getLastSequenceNumber()
                         do! deleteSnapshots (Akka.Persistence.SnapshotSelectionCriteria seqNum)
                         do! typed del <! "deleted"
                     return! outer state
             }
             return! outer initState
         }
-        
         let probe = tk.CreateTestProbe "probe"
         let handleSnapshot state =
-            tellNow (typed probe) state
-            action state
-        let act1 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act1-1")) (action "") handleSnapshot
+            match state with
+            | Some s -> 
+                tellNow (typed probe) s
+                action s
+            | None ->
+                action ""
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act1-1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
         tellNow act1 "1"
         let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
@@ -965,5 +979,332 @@ let ``snapshots are deleted by delete snapshots`` () =
         tellNow (retype act1) Akka.Actor.PoisonPill.Instance
         tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
         
-        let _act2 = spawnSnapshots tk.Sys (EventSourcedProps.PersistenceId("delete-snapshot1-id", "act2-1")) (action "") handleSnapshot
+        let _act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-snapshot1-id", actorName = "act2-1"), handleSnapshot)
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+
+type SnapshotResultHandlerMsg =
+    | AddString of string
+    | Save
+    | AddHandler of (IPersistenceControl*SnapshotResult -> bool)
+    | RemoveHandler of int
+    
+type SnapshotResultHandlerReg = {index: int}
+
+[<Test>]
+let ``snapshot result handlers are called on success`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        let snapPath = IO.Path.Combine(cur, "snapshots")
+        if IO.Directory.Exists snapPath then
+            IO.Directory.Delete (snapPath, true)
+        
+        let regProbe = tk.CreateTestProbe "reg"
+        let action initState = actor {
+            let rec loop state = actor {
+                match! persistSimple (Receive.Only<SnapshotResultHandlerMsg>()) with
+                | Save ->
+                    let! recovering = isRecovering()
+                    if not recovering then 
+                        do! saveSnapshot state                    
+                    return! loop state
+                | AddString add ->
+                    let newState = state + add
+                    return! loop newState
+                | AddHandler handler ->
+                    let! res = addSnapshotResultHandler handler
+                    tellNow (typed regProbe) {index = res}
+                    return! loop state
+                | RemoveHandler index ->
+                    do! removeSnapshotResultHandler index
+                    return! loop state
+            }
+            return! loop initState
+        }
+        let resultProbe1 = tk.CreateTestProbe()
+        let handleResult1 (ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess res ->
+                tellNow (typed resultProbe1) "success"
+                ctrl.DeleteMessages res.SequenceNr
+                ctrl.DeleteSnapshot res.SequenceNr
+                true
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe1) "failure"
+                true
+        let snapProbe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            let initState = state |> Option.defaultValue ""
+            tellNow (typed snapProbe) initState
+            action initState
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-res-handler", actorName = "act1"), handleSnapshot)
+        snapProbe.ExpectMsg "" |> ignore
+        tellNow act1 (AddHandler handleResult1)
+        let reg1 = regProbe.ExpectMsg<SnapshotResultHandlerReg>()
+        tellNow act1 (AddString "123")
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "success" |> ignore
+        let resultProbe2 = tk.CreateTestProbe()
+        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess _res ->
+                tellNow (typed resultProbe2) "success"
+                true
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe2) "failure"
+                true
+        tellNow act1 (AddHandler handleResult2)
+        let reg2 = regProbe.ExpectMsg<SnapshotResultHandlerReg>()        
+        reg2.index |> shouldNotEqual reg1.index
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "success" |> ignore
+        resultProbe2.ExpectMsg "success" |> ignore
+        tellNow act1 (RemoveHandler reg2.index)
+        tellNow act1 (AddString "1234")
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "success" |> ignore
+        resultProbe2.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        //make sure that snapshots and events were deleted (state will be empty string)
+        let _act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-res-handler", actorName = "act2"), handleSnapshot)
+        snapProbe.ExpectMsg "" |> ignore
+
+[<Test>]
+let ``snapshot result handlers are called on failure`` () =
+    use tk = new PersistenceTestKit()
+    let task = tk.WithSnapshotSave((fun w -> w.Fail()), (fun () ->
+        let cur = Environment.CurrentDirectory
+        let snapPath = IO.Path.Combine(cur, "snapshots")
+        if IO.Directory.Exists snapPath then
+            IO.Directory.Delete (snapPath, true)
+        
+        let regProbe = tk.CreateTestProbe "reg"
+        let action initState = actor {
+            let rec loop state = actor {
+                let! msg = persistSimple (Receive.Only<SnapshotResultHandlerMsg>())
+                match msg with
+                | Save ->
+                    let! recovering = isRecovering()
+                    if not recovering then 
+                        do! saveSnapshot state                    
+                    return! loop state
+                | AddString add ->
+                    let newState = state + add
+                    return! loop newState
+                | AddHandler handler ->
+                    let! res = addSnapshotResultHandler handler
+                    tellNow (typed regProbe) {index = res}
+                    return! loop state
+                | RemoveHandler index ->
+                    do! removeSnapshotResultHandler index
+                    return! loop state
+            }
+            return! loop initState
+        }
+        let resultProbe1 = tk.CreateTestProbe()
+        let handleResult1 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess _res ->
+                tellNow (typed resultProbe1) "success"
+                true
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe1) "failure"
+                true
+        let snapProbe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            let initState = state |> Option.defaultValue ""
+            tellNow (typed snapProbe) initState
+            action initState
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-res-handler", actorName = "act1"), handleSnapshot)
+        snapProbe.ExpectMsg("", Nullable(TimeSpan.FromMinutes 5.0)) |> ignore
+        tellNow act1 (AddHandler handleResult1)
+        let reg1 = regProbe.ExpectMsg<SnapshotResultHandlerReg>(Nullable(TimeSpan.FromMinutes 5.0))
+        tellNow act1 (AddString "123")
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "failure" |> ignore
+        let resultProbe2 = tk.CreateTestProbe()
+        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess _res ->
+                tellNow (typed resultProbe2) "success"
+                true
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe2) "failure"
+                true
+        tellNow act1 (AddHandler handleResult2)
+        let reg2 = regProbe.ExpectMsg<SnapshotResultHandlerReg>()        
+        reg2.index |> shouldNotEqual reg1.index
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "failure" |> ignore
+        resultProbe2.ExpectMsg "failure" |> ignore
+        tellNow act1 (RemoveHandler reg2.index)
+        tellNow act1 (AddString "1234")
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "failure" |> ignore
+        resultProbe2.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
+    ))
+    task.Wait()
+
+[<Test>]
+let ``actor stops if snapshot result handler returns false`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        let snapPath = IO.Path.Combine(cur, "snapshots")
+        if IO.Directory.Exists snapPath then
+            IO.Directory.Delete (snapPath, true)
+        
+        let regProbe = tk.CreateTestProbe "reg"
+        let action initState = actor {
+            let rec loop state = actor {
+                match! persistSimple (Receive.Only<SnapshotResultHandlerMsg>()) with
+                | Save ->
+                    let! recovering = isRecovering()
+                    if not recovering then 
+                        do! saveSnapshot state                    
+                    return! loop state
+                | AddString add ->
+                    let newState = state + add
+                    return! loop newState
+                | AddHandler handler ->
+                    let! res = addSnapshotResultHandler handler
+                    tellNow (typed regProbe) {index = res}
+                    return! loop state
+                | RemoveHandler index ->
+                    do! removeSnapshotResultHandler index
+                    return! loop state
+            }
+            return! loop initState
+        }
+        let resultProbe1 = tk.CreateTestProbe()
+        let handleResult1 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess _res ->
+                tellNow (typed resultProbe1) "success"
+                true
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe1) "failure"
+                true
+        let snapProbe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            let initState = state |> Option.defaultValue ""
+            tellNow (typed snapProbe) initState
+            action initState
+        let act1 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("snapshot-res-handler", actorName = "act1"), handleSnapshot)
+        snapProbe.ExpectMsg "" |> ignore
+        tellNow act1 (AddHandler handleResult1)
+        let reg1 = regProbe.ExpectMsg<SnapshotResultHandlerReg>()
+        tellNow act1 (AddString "123")
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "success" |> ignore
+        let resultProbe2 = tk.CreateTestProbe()
+        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+            match result with
+            | SnapshotSuccess _res ->
+                tellNow (typed resultProbe2) "success, stopping"
+                false
+            | SnapshotFailure (_meta, _reason) ->
+                tellNow (typed resultProbe2) "failure"
+                true
+        tellNow act1 (AddHandler handleResult2)
+        let reg2 = regProbe.ExpectMsg<SnapshotResultHandlerReg>()        
+        reg2.index |> shouldNotEqual reg1.index
+        tk.Watch (untyped act1) |> ignore
+        tellNow act1 Save
+        resultProbe1.ExpectMsg "success" |> ignore
+        resultProbe2.ExpectMsg "success, stopping" |> ignore
+        tk.ExpectTerminated (untyped act1) |> ignore        
+
+type TestPersistenceControl() =
+    
+    let mutable deletedMessages = []
+    let mutable deletedSnapshot = []
+    let mutable deletedSnapshots = []
+    
+    member _.DeletedMessages = deletedMessages
+    member _.DeletedSnapshot = deletedSnapshot
+    member _.DeletedSnapshots = deletedSnapshots
+    
+    interface IPersistenceControl with
+        member this.DeleteMessages(seqNum) = deletedMessages <- seqNum :: deletedMessages
+        member this.DeleteSnapshot(seqNum) = deletedSnapshot <- seqNum :: deletedSnapshot
+        member this.DeleteSnapshots(criteria) = deletedSnapshots <- criteria :: deletedSnapshots
+        
+[<Test>]
+let ``SnapshotResultHandler: deletes nothing`` () =
+    let ctrl = TestPersistenceControl()
+    let handler = SnapshotResultHandler(false, false)
+    let meta = Akka.Persistence.SnapshotMetadata("", 0L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotSuccess meta)
+    res |> shouldEqual true
+    ctrl.DeletedMessages |> shouldEqual []
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual []
+    
+[<Test>]
+let ``SnapshotResultHandler: deletes messages`` () =
+    let ctrl = TestPersistenceControl()
+    let handler = SnapshotResultHandler(true, false)
+    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotSuccess meta)
+    res |> shouldEqual true
+    ctrl.DeletedMessages |> shouldEqual [meta.SequenceNr]
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual []
+
+[<Test>]
+let ``SnapshotResultHandler: deletes snapshots`` () =
+    let ctrl = TestPersistenceControl()
+    let handler = SnapshotResultHandler(false, true)
+    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotSuccess meta)
+    res |> shouldEqual true
+    ctrl.DeletedMessages |> shouldEqual []
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual [Akka.Persistence.SnapshotSelectionCriteria (meta.SequenceNr - 1L)]
+
+[<Test>]
+let ``SnapshotResultHandler: deletes snapshots and messages`` () =
+    let ctrl = TestPersistenceControl()
+    let handler = SnapshotResultHandler(true, true)
+    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotSuccess meta)
+    res |> shouldEqual true
+    ctrl.DeletedMessages |> shouldEqual [meta.SequenceNr]
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual [Akka.Persistence.SnapshotSelectionCriteria (meta.SequenceNr - 1L)]
+
+[<Test>]
+let ``SnapshotResultHandler: returns true on failure with no error handler`` () =
+    let ctrl = TestPersistenceControl()
+    let handler = SnapshotResultHandler(true, true)
+    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotFailure(meta, exn "error"))
+    res |> shouldEqual true
+    ctrl.DeletedMessages |> shouldEqual []
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual []
+
+[<Test>]
+let ``SnapshotResultHandler: calls error handler on failure`` () =
+    let ctrl = TestPersistenceControl()
+    let mutable errMeta = None
+    let mutable errReason = None
+    let errorHandler meta err =
+        errMeta <- Some meta
+        errReason <- Some err
+        false
+    let handler = SnapshotResultHandler(true, true, errorHandler)
+    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let res = handler.Handle(ctrl, SnapshotFailure(meta, exn "error"))
+    res |> shouldEqual false
+    errMeta |> shouldEqual (Some meta)
+    match errReason with
+    | Some err -> err.Message |> shouldEqual "error"
+    | _ -> Assert.Fail "error reason not set"
+    ctrl.DeletedMessages |> shouldEqual []
+    ctrl.DeletedSnapshot |> shouldEqual []
+    ctrl.DeletedSnapshots |> shouldEqual []
+

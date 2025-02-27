@@ -9,6 +9,7 @@
     <ItemGroup>
       <PackageReference Include="Akka" Version="1.5.31" />
       <PackageReference Include="Akka.Persistence.TestKit" Version="1.5.31" />
+      <PackageReference Include="Akka.Persistence.TestKit.Xunit2" Version="1.5.31" />
       <PackageReference Include="Akka.TestKit" Version="1.5.31" />
       <PackageReference Include="Akka.TestKit.Xunit2" Version="1.5.31" />
       <PackageReference Include="Akkling.TestKit" Version="0.16.2" />

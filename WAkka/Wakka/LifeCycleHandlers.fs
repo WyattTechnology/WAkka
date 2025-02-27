@@ -30,10 +30,12 @@
 
 module internal WAkka.LifeCycleHandlers
 
-type LifeCycleHandlers<'Args_t>() =
+type LifeCycleHandlersWithResult<'Args_t, 'Result_t>(defaultRes: 'Result_t, combineRes: 'Result_t -> 'Result_t -> 'Result_t) =
     
     let mutable nextId = 0
-    let mutable handlers = Map.empty<int, 'Args_t -> unit>
+    let mutable handlers  = Map.empty<int, 'Args_t -> 'Result_t>
+    
+    member _.HasHandlers = not handlers.IsEmpty
     
     member _.AddHandler handler =
         let id = nextId
@@ -45,6 +47,10 @@ type LifeCycleHandlers<'Args_t>() =
         handlers <- handlers.Remove id
 
     member _.ExecuteHandlers args =
+        let mutable res = defaultRes
         for _id, handler in Map.toSeq handlers do
-            handler args
+            res <- combineRes res (handler args)
+        res
     
+type LifeCycleHandlers<'Args_t>() =
+    inherit LifeCycleHandlersWithResult<'Args_t, unit>((), fun _ _ -> ())    
