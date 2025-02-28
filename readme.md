@@ -128,11 +128,10 @@ reaching the end of the CE will cause the actor to stop).
 
 ### Spawning Actors
 
-Actors are normally started using the static methods of the *Spawn* class defined in either the
+Actors are normally started using the static methods of the `Spawn` class defined in either the
 `WAkka.Simple` or `WAkka.EventSourced` modules. For specialized cases where an actor class is needed
 (e.g., remote deployment) please see Actor Classes [below](#alternate-spawning-via-actor-classes).
-The parent,
-properties, and action for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>`
+The parent, properties, and action for the new actor are passed in. An `Akkling.ActorRefs.IActorRef<'Msg>`
 pointing at the new actor is returned. The `'Msg` type is inferred from the calling context. If you
 want to fix the message type in the actor reference then wrap your call to spawn and actor in a
 function and specify the message type for the returned reference:
@@ -165,19 +164,19 @@ To start the two actors above one would do:
 ```f#
 open WAkka
 
-let act1 = Simple.spawnNotPersisted parent Context.Props.Anonymous (handle "")
-let act2 = Simple.spawnNotPersisted parent Context.Props.Anonymous workflow
+let act1 = Simple.Spawn.NotPersisted(parent, Context.Props.Anonymous, (fun () -> handle ""))
+let act2 = Simple.Spawn.NotPersisted(parent, Context.Props.Anonymous, (fun () -> workflow))
 ```
 
 In this case the actors were started with no persistence. To use checkpointing just substitute
-`Simple.spawnCheckpointed` for `Simple.spawnNotPersisted`.
+`Simple.Spawn.Checkpointed` for `Simple.Spawn.NotPersisted`.
 
 #### Deprecated Spawn Functions
 
-Before version 1.5, WAkka spawned actors using the functions in the `WAkka.Spawn` or various
-functions in the `WAkka.Simple` and `WAkka.EventSourced` module. Those functions still exist to
+Before version 1.5, WAkka spawned actors using the functions in the `WAkka.Spawn`,`WAkka.Simple`,
+and `WAkka.EventSourced` modules. Those functions still exist to
 support backwards compatibility, but should not be used in new code. The static members of
-the `Spawn` class in each of those modules should be used instead.
+the `Spawn` class in the `WAkka.Simple` and `WAkka.EventSourced` modules should be used instead.
 
 #### Alternate spawning via actor classes
 
@@ -255,7 +254,7 @@ The `Common` module also contains functions to change the result type of an acti
 #### Simple actions
 
 These actions can only be used directly in a simple actor (i.e. those started with
-`Simple.spawnNotPersisted` or `Simple.spawnCheckpointed`)
+`Simple.Spawn.NotPersisted` or `Simple.Spawn.Checkpointed`)
 
 * `Receive`: Static methods of this class are used to receive messages. Each method has an optional
   timeout and those that filter messages have a *strategy* for dealing with messages that are
