@@ -102,7 +102,6 @@ module private EventSourcedActorPrivate =
 
     type PersistenceMsg =
         | Completed
-        | Failed of exn * obj
         | Rejected of result:obj * reason:exn * sequenceNr:int64
 
 open EventSourcedActorPrivate
@@ -228,7 +227,6 @@ module Internal =
         override _.OnRecoveryFailure(reason, message) =
             let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"recovery failed on message {message}: {reason}"
-            msgHandler false (Failed (reason, message) :> obj)
 
         override this.PreRestart(reason, message) =
             let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
@@ -481,9 +479,6 @@ module Actions =
         /// Recovery was running, but has now finished. The action was not executed and should be repeated if its
         /// result is needed.  
         | RecoveryDone
-        /// Recovery was running, but has failed due to the given reason while processing the given message. The action
-        /// was not executed.
-        | RecoveryFailed of reason:exn * message:obj
     
     /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
     /// action and return the persisted result instead. This version of persist will return persistence lifecycle events
@@ -506,9 +501,6 @@ module Actions =
                 match pMsg with
                 | Completed ->
                     return RecoveryDone
-                | Failed(reason, msg) ->
-                    //already logged the error in OnRecoveryFailed
-                    return RecoveryFailed (reason, msg)
                 | Rejected(result, reason, sequenceNr) ->
                     return ActionResultRejected (result :?> 'Result, reason, sequenceNr)
             | _ ->
@@ -534,7 +526,6 @@ module Actions =
                 match recovery with
                 | Completed ->
                     return! getEvt ()
-                | Failed _
                 | Rejected _ ->
                     //already logged the error in OnRecoveryFailed
                     return! stop ()
