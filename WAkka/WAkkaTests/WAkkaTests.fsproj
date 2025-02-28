@@ -7,12 +7,12 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <PackageReference Include="Akka" Version="1.5.31" />
-      <PackageReference Include="Akka.Persistence.TestKit" Version="1.5.31" />
-      <PackageReference Include="Akka.Persistence.TestKit.Xunit2" Version="1.5.31" />
-      <PackageReference Include="Akka.TestKit" Version="1.5.31" />
-      <PackageReference Include="Akka.TestKit.Xunit2" Version="1.5.31" />
-      <PackageReference Include="Akkling.TestKit" Version="0.16.2" />
+      <PackageReference Include="Akka" Version="1.5.38" />
+      <PackageReference Include="Akka.Persistence.TestKit" Version="1.5.38" />
+      <PackageReference Include="Akka.Persistence.TestKit.Xunit2" Version="1.5.38" />
+      <PackageReference Include="Akka.TestKit" Version="1.5.38" />
+      <PackageReference Include="Akka.TestKit.Xunit2" Version="1.5.38" />
+      <PackageReference Include="Akkling.TestKit" Version="0.17.0" />
       <PackageReference Include="altcover" Version="8.9.3" />
       <PackageReference Include="FsUnit" Version="4.1.0" />
       <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.0.0" />

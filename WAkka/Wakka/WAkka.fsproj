@@ -2,9 +2,9 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0</TargetFrameworks>
-    <PackageVersion>1.5.0-alpha3</PackageVersion>
-    <AssemblyVersion>1.5.0</AssemblyVersion>
-    <FileVersion>1.5.0</FileVersion>
+    <PackageVersion>1.5.1</PackageVersion>
+    <AssemblyVersion>1.5.1</AssemblyVersion>
+    <FileVersion>1.5.1</FileVersion>
     <Authors>Wyatt Technology</Authors>
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
@@ -36,13 +36,13 @@
     <Compile Include="Spawn.fs" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="Akka" Version="1.5.31" />
-    <PackageReference Include="Akka.Persistence" Version="1.5.31" />
-    <PackageReference Include="Akka.Serialization.Hyperion" Version="1.5.31" />
-    <PackageReference Include="Akka.Streams" Version="1.5.31" />
+    <PackageReference Include="Akka" Version="1.5.38" />
+    <PackageReference Include="Akka.Persistence" Version="1.5.38" />
+    <PackageReference Include="Akka.Serialization.Hyperion" Version="1.5.38" />
+    <PackageReference Include="Akka.Streams" Version="1.5.38" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
-    <PackageReference Include="Akkling" Version="0.16.2" />
-    <PackageReference Include="Akkling.Persistence" Version="0.16.2" />
+    <PackageReference Include="Akkling" Version="0.17.0" />
+    <PackageReference Include="Akkling.Persistence" Version="0.17.0" />
     <PackageReference Update="FSharp.Core" Version="8.0.403" />
     <PackageReference Include="FsToolkit.ErrorHandling" Version="2.13.0" />
   </ItemGroup>
