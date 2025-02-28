@@ -204,6 +204,11 @@ module Internal =
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
             rejectionHandler (event, cause, sequenceNr)
 
+        override this.OnPersistFailure(cause, event, sequenceNr) =
+            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+            logger.Error $"failure persisting event (actor will stop) ({sequenceNr}) {event}: {cause}"
+            base.OnPersistFailure(cause, event, sequenceNr)
+
         override _.OnRecover (msg: obj) =
             match msg with
             | :? Akka.Persistence.SnapshotOffer as snapshot ->
@@ -486,7 +491,8 @@ module Actions =
     /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
     /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
     /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
-    /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned. 
+    /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned.
+    /// If persisting an event fails, then the failure will be logged and the actor will stop.  
     let persist (action: Simple.SimpleAction<'Result>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObj (Simple.actor {

@@ -493,6 +493,67 @@ let ``foldValues processes all elements`` () =
         probe.ExpectMsg (List.sum values) |> ignore
 
 [<Test>]
+let ``actor stops if persistSimple gets a rejection`` () =
+    use tk = new PersistenceTestKit()
+    let t = tk.WithJournalWrite((fun w -> w.Reject()), fun () ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec start snap =
+            actor {
+                let! _msg = 
+                    persistSimple (
+                        Simple.actor {
+                            let! msg = Receive.Only<Msg> ()
+                            do! (typed probe) <! msg
+                            return msg
+                        }
+                    )
+                return! start snap
+            }
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", start)
+        tk.Watch (untyped act) |> ignore
+        let m1 = {value = 1234}
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg(m1, TimeSpan.FromSeconds 60.0) |> ignore
+        tk.ExpectTerminated (untyped act) |> ignore
+    )
+    t.Wait()
+
+[<Test>]
+let ``get proper result when persist gets rejected`` () =
+    use tk = new PersistenceTestKit()
+    let t = tk.WithJournalWrite((fun w -> w.Reject()), fun () ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec start snap =
+            actor {
+                let! res = 
+                    persist (
+                        Simple.actor {
+                            let! msg = Receive.Only<Msg> ()
+                            do! (typed probe) <! msg
+                            return msg
+                        }
+                    )
+                do! typed probe <! res
+                return! start snap
+            }
+        let act = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.Named "test", start)
+        let _recoveryDone = probe.ExpectMsg()
+        let m1 = {value = 1234}
+        act.Tell(m1, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg(m1, TimeSpan.FromSeconds 60.0) |> ignore
+        let msg = probe.ExpectMsg<PersistResult<Msg>>()
+        match msg with
+        | ActionResultRejected(_result, _reason, _sequenceNr) -> ()
+        | other -> Assert.Fail $"Expected ActionResultRejected but got {other}"
+        let m2 = {value = 12345}
+        act.Tell(m2, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg(m2, TimeSpan.FromSeconds 60.0) |> ignore
+    )
+    t.Wait()
+
+[<Test>]
 let ``state is recovered when actor starts again using custom persistence id`` () =
     TestKit.testDefault <| fun tk ->
         let action = actor {
@@ -682,8 +743,6 @@ let ``state is recovered after a crash with simple persist`` () =
         let msg3 = "3"
         crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
-
-//TODO: Needs tests for persistence rejection and recovery failure
 
 let recoveryTestAction probe = actor {
     let! res1 = isRecovering ()
