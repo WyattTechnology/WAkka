@@ -33,6 +33,7 @@ module WAkkaTests.SnapshotTests
 open System
 
 open Akka.Persistence.TestKit
+open Moq
 open NUnit.Framework
 open FsUnitTyped
 
@@ -1044,7 +1045,7 @@ let ``snapshots are deleted by delete snapshots`` () =
 type SnapshotResultHandlerMsg =
     | AddString of string
     | Save
-    | AddHandler of (IPersistenceControl*SnapshotResult -> bool)
+    | AddHandler of (ISnapshotControl*SnapshotResult -> bool)
     | RemoveHandler of int
     
 type SnapshotResultHandlerReg = {index: int}
@@ -1080,7 +1081,7 @@ let ``snapshot result handlers are called on success`` () =
             return! loop initState
         }
         let resultProbe1 = tk.CreateTestProbe()
-        let handleResult1 (ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult1 (ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess res ->
                 tellNow (typed resultProbe1) "success"
@@ -1103,7 +1104,7 @@ let ``snapshot result handlers are called on success`` () =
         tellNow act1 Save
         resultProbe1.ExpectMsg "success" |> ignore
         let resultProbe2 = tk.CreateTestProbe()
-        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult2 (_ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess _res ->
                 tellNow (typed resultProbe2) "success"
@@ -1164,7 +1165,7 @@ let ``snapshot result handlers are called on failure`` () =
             return! loop initState
         }
         let resultProbe1 = tk.CreateTestProbe()
-        let handleResult1 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult1 (_ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess _res ->
                 tellNow (typed resultProbe1) "success"
@@ -1185,7 +1186,7 @@ let ``snapshot result handlers are called on failure`` () =
         tellNow act1 Save
         resultProbe1.ExpectMsg "failure" |> ignore
         let resultProbe2 = tk.CreateTestProbe()
-        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult2 (_ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess _res ->
                 tellNow (typed resultProbe2) "success"
@@ -1238,7 +1239,7 @@ let ``actor stops if snapshot result handler returns false`` () =
             return! loop initState
         }
         let resultProbe1 = tk.CreateTestProbe()
-        let handleResult1 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult1 (_ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess _res ->
                 tellNow (typed resultProbe1) "success"
@@ -1259,7 +1260,7 @@ let ``actor stops if snapshot result handler returns false`` () =
         tellNow act1 Save
         resultProbe1.ExpectMsg "success" |> ignore
         let resultProbe2 = tk.CreateTestProbe()
-        let handleResult2 (_ctrl: IPersistenceControl, result:SnapshotResult) =
+        let handleResult2 (_ctrl: ISnapshotControl, result:SnapshotResult) =
             match result with
             | SnapshotSuccess _res ->
                 tellNow (typed resultProbe2) "success, stopping"
@@ -1281,16 +1282,31 @@ type TestPersistenceControl() =
     let mutable deletedMessages = []
     let mutable deletedSnapshot = []
     let mutable deletedSnapshots = []
+    let mutable logged = []
     
     member _.DeletedMessages = deletedMessages
     member _.DeletedSnapshot = deletedSnapshot
     member _.DeletedSnapshots = deletedSnapshots
+    member _.Logged = logged
     
-    interface IPersistenceControl with
+    interface ISnapshotControl with
         member this.DeleteMessages(seqNum) = deletedMessages <- seqNum :: deletedMessages
         member this.DeleteSnapshot(seqNum) = deletedSnapshot <- seqNum :: deletedSnapshot
         member this.DeleteSnapshots(criteria) = deletedSnapshots <- criteria :: deletedSnapshots
-        
+        member this.Logger =
+            let akkaLogger = Moq.Mock<Akka.Event.ILoggingAdapter>()
+            akkaLogger
+                .Setup(fun logger -> logger.IsErrorEnabled)
+                .Returns true
+            |> ignore
+            akkaLogger
+                .Setup(fun logger -> logger.Log(It.IsAny<Akka.Event.LogLevel>(), It.IsAny<exn>(), It.IsAny<Akka.Event.LogMessage>()))
+                .Callback(fun (lvl: Akka.Event.LogLevel) (cause: exn) (msg: Akka.Event.LogMessage) ->
+                    logged <- (lvl, cause, msg)::logged
+                )
+            |> ignore
+            Logger(akkaLogger.Object)
+            
 [<Test>]
 let ``SnapshotResultHandler: deletes nothing`` () =
     let ctrl = TestPersistenceControl()
@@ -1339,12 +1355,22 @@ let ``SnapshotResultHandler: deletes snapshots and messages`` () =
 let ``SnapshotResultHandler: returns true on failure with no error handler`` () =
     let ctrl = TestPersistenceControl()
     let handler = SnapshotResultHandler(true, true)
-    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let persistenceId = "persistence-id"
+    let seqNr = 10L
+    let meta = Akka.Persistence.SnapshotMetadata(persistenceId, seqNr, DateTime.Now)
     let res = handler.Handle(ctrl, SnapshotFailure(meta, exn "error"))
     res |> shouldEqual true
     ctrl.DeletedMessages |> shouldEqual []
     ctrl.DeletedSnapshot |> shouldEqual []
     ctrl.DeletedSnapshots |> shouldEqual []
+    ctrl.Logged.Length |> shouldEqual 1
+    let lvl, cause, msg = ctrl.Logged.Head
+    lvl |> shouldEqual Akka.Event.LogLevel.ErrorLevel
+    cause.Message |> shouldEqual "error"
+    let ps = [| for p in msg.Parameters() do p |]
+    ps.Length |> shouldEqual 2
+    ps[0] |> shouldEqual persistenceId
+    ps[1] |> shouldEqual seqNr
 
 [<Test>]
 let ``SnapshotResultHandler: calls error handler on failure`` () =
@@ -1356,7 +1382,9 @@ let ``SnapshotResultHandler: calls error handler on failure`` () =
         errReason <- Some err
         false
     let handler = SnapshotResultHandler(true, true, errorHandler)
-    let meta = Akka.Persistence.SnapshotMetadata("", 10L, DateTime.Now)
+    let persistenceId = "persistence-id"
+    let seqNr = 10L
+    let meta = Akka.Persistence.SnapshotMetadata(persistenceId, seqNr, DateTime.Now)
     let res = handler.Handle(ctrl, SnapshotFailure(meta, exn "error"))
     res |> shouldEqual false
     errMeta |> shouldEqual (Some meta)
@@ -1366,4 +1394,5 @@ let ``SnapshotResultHandler: calls error handler on failure`` () =
     ctrl.DeletedMessages |> shouldEqual []
     ctrl.DeletedSnapshot |> shouldEqual []
     ctrl.DeletedSnapshots |> shouldEqual []
+    ctrl.Logged |> shouldEqual []
 

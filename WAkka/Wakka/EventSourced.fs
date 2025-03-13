@@ -31,7 +31,6 @@
 module WAkka.EventSourced
 
 open Akka.Event
-
 open Common
 open WAkka.LifeCycleHandlers
 
@@ -52,19 +51,21 @@ type SnapshotResult =
     | SnapshotFailure of meta:Akka.Persistence.SnapshotMetadata * cause:exn
 
 /// Interface that allows deletion of persistence messages and snapshots.
-type IPersistenceControl =
+type ISnapshotControl =
     /// Delete all persisted messages up to the given sequence number (inclusive).
     abstract member DeleteMessages: seqNum:int64 -> unit
     /// Delete the snapshot with the given sequence number.
     abstract member DeleteSnapshot: seqNum:int64 -> unit
     /// Delete all snapshots that satisfy the given criteria.
     abstract member DeleteSnapshots: criteria:Akka.Persistence.SnapshotSelectionCriteria -> unit
+    /// The actor's logger.
+    abstract member Logger: Logger
     
 type EventSourcedExtra<'Snapshot> =
     | RunAction of action:Simple.SimpleAction<obj>
     | GetRecovering
     | Snapshot of snapshot:'Snapshot
-    | AddSnapshotResultHandler of handler:(IPersistenceControl * SnapshotResult -> bool)
+    | AddSnapshotResultHandler of handler:(ISnapshotControl * SnapshotResult -> bool)
     | RemoveSnapshotResultHandler of index:int
     
 /// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
@@ -112,7 +113,7 @@ module Internal =
         abstract member HandleSnapshotExtra: 'Snapshot -> Akka.Persistence.UntypedPersistentActor -> (obj -> EventSourcedActionBase<'a, 'Snapshot>) -> EventSourcedActionBase<'a, 'Snapshot>
     
     type internal SnapshotResultsHandlers() =
-        inherit LifeCycleHandlersWithResult<IPersistenceControl * SnapshotResult, bool>(true, (&&))
+        inherit LifeCycleHandlersWithResult<ISnapshotControl * SnapshotResult, bool>(true, (&&))
         
     type EventSourcedActorBase<'Snapshot>(
         persistenceId: Option<string>,
@@ -122,15 +123,17 @@ module Internal =
         inherit Akka.Persistence.UntypedPersistentActor ()
 
         let ctx = Akka.Persistence.Eventsourced.Context
+        let logger = Logger ctx
         
         let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
         let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
         let mutable snapshotResultsHandlers = SnapshotResultsHandlers()
-        let persistControl = {
-            new IPersistenceControl with
+        let snapshotControl = {
+            new ISnapshotControl with
                 member _.DeleteMessages seqNum = this.DeleteMessages seqNum
                 member _.DeleteSnapshot seqNum = this.DeleteSnapshot seqNum
                 member _.DeleteSnapshots criteria = this.DeleteSnapshots criteria
+                member _.Logger = logger
         }
 
         let mutable msgHandler = fun (_recovering: bool) _msg -> ()
@@ -139,12 +142,12 @@ module Internal =
                 if snapshotResultsHandlers.HasHandlers then 
                     match msg with
                     | :? Akka.Persistence.SaveSnapshotSuccess as success ->
-                        if not (snapshotResultsHandlers.ExecuteHandlers(persistControl, SnapshotSuccess success.Metadata)) then
+                        if not (snapshotResultsHandlers.ExecuteHandlers(snapshotControl, SnapshotSuccess success.Metadata)) then
                             ctx.Stop ctx.Self
                         else 
                             newMsgHandler recovering msg
                     | :? Akka.Persistence.SaveSnapshotFailure as failure ->
-                        if not (snapshotResultsHandlers.ExecuteHandlers(persistControl, SnapshotFailure (failure.Metadata, failure.Cause))) then 
+                        if not (snapshotResultsHandlers.ExecuteHandlers(snapshotControl, SnapshotFailure (failure.Metadata, failure.Cause))) then 
                             ctx.Stop ctx.Self
                         else 
                             newMsgHandler recovering msg
@@ -187,7 +190,6 @@ module Internal =
                     snapshotResultsHandlers.RemoveHandler index
 
         do updateMsgHandler (fun recovering msg ->
-            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
         )
         
@@ -199,12 +201,10 @@ module Internal =
             msgHandler false msg
 
         override _.OnPersistRejected(cause, event, sequenceNr) =
-            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
             rejectionHandler (event, cause, sequenceNr)
 
         override this.OnPersistFailure(cause, event, sequenceNr) =
-            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"failure persisting event (actor will stop) ({sequenceNr}) {event}: {cause}"
             base.OnPersistFailure(cause, event, sequenceNr)
 
@@ -225,11 +225,9 @@ module Internal =
                 msgHandler true msg
 
         override _.OnRecoveryFailure(reason, message) =
-            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"recovery failed on message {message}: {reason}"
 
         override this.PreRestart(reason, message) =
-            let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
             logger.Error $"Actor crashed on {message}: {reason}"
             restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
             base.PreRestart(reason, message)
@@ -241,7 +239,7 @@ module Internal =
         interface IActionContext with
             member _.Context = ctx
             member _.Self = ctx.Self
-            member _.Logger = Logger ctx
+            member _.Logger = logger
             member _.Sender = ctx.Sender
             member _.Scheduler = ctx.System.Scheduler
             member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
@@ -595,10 +593,10 @@ module Actions =
     /// </param>
     /// <param name="errorHandler">
     /// If given, it will be called if there is a snapshot save error. If it returns false then the actor will be
-    /// stopped. If not given, snapshot save errors will be ignored.
+    /// stopped. If not given, snapshot save errors will be logged only.
     /// </param>
     type SnapshotResultHandler(deletePriorMessages, deletePriorSnapshots, ?errorHandler) =
-        member _.Handle (control: IPersistenceControl, result) = 
+        member _.Handle (control: ISnapshotControl, result) = 
             match result with
             | SnapshotSuccess metadata ->
                 if deletePriorMessages then 
@@ -608,8 +606,16 @@ module Actions =
                 true
             | SnapshotFailure (metadata, cause) ->
                 match errorHandler with
-                | Some errHandler -> errHandler metadata cause
-                | None -> true
+                | Some errHandler ->
+                    errHandler metadata cause
+                | None ->
+                    control.Logger.Logger.Error(
+                        cause,
+                        "Snapshot save failed({0}, {1})",
+                        metadata.PersistenceId,
+                        metadata.SequenceNr
+                    )
+                    true
 
     /// Removes a snapshot result handler that was registered using addSnapshotResultHandler. 
     let removeSnapshotResultHandler index : SnapshotAction<unit, 'Snapshot> = actor {
