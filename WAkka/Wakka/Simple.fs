@@ -129,8 +129,7 @@ let internal handleSimpleActions (
             handler ()
         with
         | err ->
-            let logger = Logger ctx
-            logger.Error $"Got exception when running finally handler: {err}"
+            ctx.GetLogger().Error(err, "Got exception when running finally handler")
 
     let rec handleActions (action: SimpleAction<obj>) =
         match action with
@@ -341,12 +340,12 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
     let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
     let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
     
-    let logger = Logger ctx
+    let logger = ctx.GetLogger()
 
     let mutable msgHandler = {
         new IMessageHandler with
             member this.HandleMessage msg =
-                logger.Error $"Received message before waitForStart installed: {msg}"
+                logger.Error("Received message before waitForStart installed: {0}", msg)
     }
 
     do

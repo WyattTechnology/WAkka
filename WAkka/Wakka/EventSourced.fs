@@ -59,7 +59,7 @@ type ISnapshotControl =
     /// Delete all snapshots that satisfy the given criteria.
     abstract member DeleteSnapshots: criteria:Akka.Persistence.SnapshotSelectionCriteria -> unit
     /// The actor's logger.
-    abstract member Logger: Logger
+    abstract member Logger: ILoggingAdapter
     
 type EventSourcedExtra<'Snapshot> =
     | RunAction of action:Simple.SimpleAction<obj>
@@ -123,7 +123,7 @@ module Internal =
         inherit Akka.Persistence.UntypedPersistentActor ()
 
         let ctx = Akka.Persistence.Eventsourced.Context
-        let logger = Logger ctx
+        let logger = ctx.GetLogger()
         
         let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
         let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
@@ -190,7 +190,7 @@ module Internal =
                     snapshotResultsHandlers.RemoveHandler index
 
         do updateMsgHandler (fun recovering msg ->
-            logger.Error $"Got msg before first receive(recovering = {recovering}): {msg}"
+            logger.Error("Got msg before first receive(recovering = {0}): {1}", recovering, msg)
         )
         
         let mutable actionsInitialized = false
@@ -201,11 +201,11 @@ module Internal =
             msgHandler false msg
 
         override _.OnPersistRejected(cause, event, sequenceNr) =
-            logger.Error $"rejected event ({sequenceNr}) {event}: {cause}"
+            logger.Error(cause, "rejected event [sequence number {0}] {1}", sequenceNr, event)
             rejectionHandler (event, cause, sequenceNr)
 
         override this.OnPersistFailure(cause, event, sequenceNr) =
-            logger.Error $"failure persisting event (actor will stop) ({sequenceNr}) {event}: {cause}"
+            logger.Error(cause, "failure persisting event, actor will stop [sequence number {0}] {1}", sequenceNr, event)
             base.OnPersistFailure(cause, event, sequenceNr)
 
         override _.OnRecover (msg: obj) =
@@ -225,10 +225,10 @@ module Internal =
                 msgHandler true msg
 
         override _.OnRecoveryFailure(reason, message) =
-            logger.Error $"recovery failed on message {message}: {reason}"
+            logger.Error(reason, "recovery failed on message {0}", message)
 
         override this.PreRestart(reason, message) =
-            logger.Error $"Actor crashed on {message}: {reason}"
+            logger.Error(reason, "Actor crashed on {0}", message)
             restartHandlers.ExecuteHandlers(this :> IActorContext, message, reason)
             base.PreRestart(reason, message)
         
@@ -239,7 +239,7 @@ module Internal =
         interface IActionContext with
             member _.Context = ctx
             member _.Self = ctx.Self
-            member _.Logger = logger
+            member _.Logger = Logger ctx
             member _.Sender = ctx.Sender
             member _.Scheduler = ctx.System.Scheduler
             member _.ActorFactory = ctx :> Akka.Actor.IActorRefFactory
@@ -259,15 +259,15 @@ type private NoSnapshotHandler (startAction) =
             match snapshot with
             | Some snap -> 
                 actor {
-                    let! logger = getLogger()
-                    logger.Error $"Got snapshot offer without handler (stopping actor): {snap}"
+                    let! logger = getAkkaLogger()
+                    logger.Error("Got snapshot offer without handler (stopping actor): {0}", snap) 
                     return! stop ()            
                 }
             | None ->
                 startAction ()
         member _.HandleSnapshotExtra extra _act _next = actor {
-            let! logger = getLogger()
-            logger.Error $"Got snapshot extra without handler (stopping actor): {extra}"
+            let! logger = getAkkaLogger()
+            logger.Error("Got snapshot extra without handler (stopping actor): {0}", extra)
             return! stop ()            
         }
         
@@ -609,7 +609,7 @@ module Actions =
                 | Some errHandler ->
                     errHandler metadata cause
                 | None ->
-                    control.Logger.Logger.Error(
+                    control.Logger.Error(
                         cause,
                         "Snapshot save failed({0}, {1})",
                         metadata.PersistenceId,

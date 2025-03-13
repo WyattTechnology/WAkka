@@ -1305,7 +1305,7 @@ type TestPersistenceControl() =
                     logged <- (lvl, cause, msg)::logged
                 )
             |> ignore
-            Logger(akkaLogger.Object)
+            akkaLogger.Object
             
 [<Test>]
 let ``SnapshotResultHandler: deletes nothing`` () =

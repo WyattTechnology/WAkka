@@ -41,22 +41,28 @@ type Logger (logger: ILoggingAdapter) =
     /// The underlying Akka.NET logger.
     member _.Logger = logger
     
-    /// Log the given message at the given level.
+    /// Log the given message at the given level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Log level (msg: string) = logger.Log (level, msg)
 
-    ///Log the given exception.
+    ///Log the given exception. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.LogException (err: exn) = logger.Error err.Message
 
-    ///Log the given message at the debug level.
+    ///Log the given message at the debug level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Debug (msg: string) = logger.Debug msg
 
-    ///Log the given message at the info level.
+    ///Log the given message at the info level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Info (msg: string) = logger.Info msg
 
-    ///Log the given message at the warning level.
+    ///Log the given message at the warning level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Warning (msg: string) = logger.Warning msg
 
-    ///Log the given message at the error level.
+    ///Log the given message at the error level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Error (msg: string) = logger.Error msg
 
 /// An actor context.
@@ -169,9 +175,12 @@ module CommonActions =
     /// Gets the context for this actor. Normally, this should not be needed. All of its "safe" functionality can be invoked using actions.
     let unsafeGetActorCtx () = Simple (fun ctx -> Done (ctx :> IActorContext))
 
-    /// Gets the logger for this actor.
+    /// Gets the logger for this actor. In most cases it is better to use the methods of the Akka ILoggingAdapter which
+    /// can be obtained from getAkkaLogger instead of using this action.
     let getLogger () = Simple (fun ctx -> Done ctx.Logger)
-
+    /// Gets the Akka ILoggingAdapter for this actor.
+    let getAkkaLogger() = Simple (fun ctx -> Done ctx.Logger.Logger)
+    
     /// Stops this actor.
     let stop () =
         // This weird dance is here so that the result of stop can adapt to the context that it is called in, and
