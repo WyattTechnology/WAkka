@@ -214,8 +214,10 @@ These actions can be used directly in both simple and event sourced actors.
 * `getActor`: Get the reference for this actor.
 * `unsafeGetActorCtx`: Gets the actor context for this actor as a `WAkka.Context.IActorContext`.
   Normally this context is not needed, its functionality is available through the built-in actions.
+* `getAkkaLogger`: Gets a `Akka.Event.ILoggingAdapter` for the current actor. 
 * `getLogger`: Gets an `WAkka.Logger.Logger` for this actor which can be used to log messages
-  through the Akka.NET logging system.
+  through the Akka.NET logging system. This action is gor backwards compatibility, `getAkkaLogger`
+  should be used instead.
 * `stop`: Stops this actor.
 * `createChild`: Creates a child of this actor. The given function will be passed an
   `IActorRefFactory` to use when creating the new actor.
