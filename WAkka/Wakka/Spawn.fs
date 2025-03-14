@@ -38,14 +38,14 @@ type ActorType =
     | EventSourced of EventSourced.EventSourcedActionBase<unit, EventSourced.NoSnapshotExtra>
 
 /// Creates an actor that goes back to the given action if it restarts. NOTE: This function is deprecated,
-/// use Simple.spawnNotPersisted instead.
+/// use Simple.Spawn.NotPersisted instead.
 let notPersisted action = NotPersisted action
 /// Creates and actor that runs the given action. If the actor crashes then it restarts from the last point where it
-/// was waiting for a message.NOTE: This function is deprecated, use Simple.spawnCheckpointed instead.
+/// was waiting for a message. NOTE: This function is deprecated, use Simple.Spawn.Checkpointed instead.
 let checkpointed action = Checkpointed action
 /// Creates an actor that uses the Akka.NET persistence event sourcing mechanism. In the event of a restart, the actor
 /// will replay events that were stored using the EventSourced.Actions.persist action. NOTE: This function is deprecated,
-/// use EventSourced.spawnNoSnapshots or EventSourced.spawnSnapshots instead.
+/// use EventSourced.Spawn.NoSnapshots or EventSourced.Spawn.Snapshots instead.
 let eventSourced action = EventSourced action
 
 /// Creates a new actor that is a child of the given parent. The actor will be created using the given properties and
@@ -55,8 +55,8 @@ let spawn (parent: Akka.Actor.IActorRefFactory) (props: Common.Props) (actorType
 
     match actorType with
     | NotPersisted action ->
-        Simple.spawn parent props false action
+        Simple.spawn parent props false (fun () -> action)
     | Checkpointed action ->
-        Simple.spawn parent props true action
+        Simple.spawn parent props true (fun () -> action)
     | EventSourced action ->
         EventSourced.spawnNoSnapshots parent {persistenceId = None; common = props} action

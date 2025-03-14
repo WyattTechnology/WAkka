@@ -186,7 +186,7 @@ module ActorResultCE =
     /// Result that the action evaluated to. If the result is "Ok okValue" then "okValue" is bound to "value". If the
     /// result is "Error err" then the "actorResult" CE terminates with a value of "Error err". Note that the right
     /// side of a "let! ... = ..." must evaluate to "SimpleAction<Result<'res, 'err>>". There are numerous functions in
-    /// the ActorResult module that can help convert other types (booleans, options, etc) into the proper type. The
+    /// the ActorResult module that can help convert other types (booleans, options, etc.) into the proper type. The
     /// "actorResult" CE produces a "Delayed<Result<'res, 'err>>" and must be passed to runActorResult for evaluation.
     let actorResult = ActorResultBuilder()
     /// Evaluates an actorResult computation expression.

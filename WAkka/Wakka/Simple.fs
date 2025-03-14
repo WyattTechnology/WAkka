@@ -129,8 +129,7 @@ let internal handleSimpleActions (
             handler ()
         with
         | err ->
-            let logger = Logger ctx
-            logger.Error $"Got exception when running finally handler: {err}"
+            ctx.GetLogger().Error(err, "Got exception when running finally handler")
 
     let rec handleActions (action: SimpleAction<obj>) =
         match action with
@@ -323,8 +322,8 @@ let internal handleSimpleActions (
 /// The actor class used when spawning an actor of notPersisted or checkpointed type.
 /// This class is not meant to be used directly, instead use Spawn.spawn, or derive a new class from NotPersistedActor or CheckpointedActor.
 /// </summary>
-type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
-
+type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as this =
+    
     inherit Akka.Actor.UntypedActor ()
 
     let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
@@ -341,12 +340,12 @@ type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
     let mutable restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
     let mutable stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
     
-    let logger = Logger ctx
+    let logger = ctx.GetLogger()
 
     let mutable msgHandler = {
         new IMessageHandler with
             member this.HandleMessage msg =
-                logger.Error $"Received message before waitForStart installed: {msg}"
+                logger.Error("Received message before waitForStart installed: {0}", msg)
     }
 
     do
@@ -360,7 +359,7 @@ type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
                         stopHandlers <- start.stopHandlers
                         match start.checkpoint with
                         | None ->
-                            handleSimpleActions(ctx, this, (fun h -> msgHandler <- h), onDone, (startAction |> mapResult (fun a -> a :> obj)))
+                            handleSimpleActions(ctx, this, (fun h -> msgHandler <- h), onDone, (startAction () |> mapResult (fun a -> a :> obj)))
                         | Some cont ->
                             msgHandler <- cont
                         stash.UnstashAll ()
@@ -422,16 +421,25 @@ type SimpleActor (persist: bool, startAction: SimpleAction<unit>) as this =
 /// can be derived from this class instead.  
 /// </summary>
 /// <param name="action">The action for the actor to run.</param>
-type NotPersistedActor(action: SimpleAction<unit>) = inherit SimpleActor(false, action)
+type NotPersistedActor(action: unit -> SimpleAction<unit>) =
+    
+    inherit SimpleActor(false, action)
+    
+    new (action: SimpleAction<unit>) = NotPersistedActor(fun () -> action)
+    
 /// <summary>
 /// Class that can be used to spawn checkpointed actors. Usually, Spawn.spawn should be used to spawn actors, but if
 /// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
 /// can be derived from this class instead.
 /// </summary>
 /// <param name="action">The action for the actor to run.</param>
-type CheckpointedActor(action: SimpleAction<unit>) = inherit SimpleActor(true, action)
+type CheckpointedActor(action: unit -> SimpleAction<unit>) =
     
-let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist: bool) (action: SimpleAction<unit>) =
+    inherit SimpleActor(true, action)
+    
+    new (action: SimpleAction<unit>) = CheckpointedActor(fun () -> action)
+    
+let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist: bool) (action: unit -> SimpleAction<unit>) =
     let applyMod arg modifier current =
         match arg with
         | Some a -> modifier a current
@@ -451,22 +459,44 @@ let internal spawn (parent: Akka.Actor.IActorRefFactory) (props: Props) (persist
             parent.ActorOf(actProps)
     Akkling.ActorRefs.typed act
 
+type Spawn () =
+    
+    /// <summary>
+    /// Spawns an actor whose state is not persisted if it crashes (i.e., it restarts from the initial action).
+    /// </summary>
+    /// <param name="parent">The actor's parent.</param>
+    /// <param name="props">The actor's properties.</param>
+    /// <param name="action">Function that generates the initial action for the actor</param>
+    static member NotPersisted(parent, props, action) =
+        spawn parent props false action
+    
+    /// <summary>
+    /// Spawns an actor whose state is persisted if it crashes (i.e., the actor restarts from the last point where it
+    /// waited for a message).
+    /// </summary>
+    /// <param name="parent">The actor's parent.</param>
+    /// <param name="props">The actor's properties.</param>
+    /// <param name="action">Function that generates the initial action for the actor</param>
+    static member Checkpointed(parent, props, action) =
+        spawn parent props true action
+
 /// <summary>
-/// Creates an actor that goes back to the given action if it restarts.
+/// Creates an actor that goes back to the given action if it restarts. NOTE: This function is deprecated, use
+/// Simple.Spawn.NotPersisted instead.
 /// </summary>
 /// <param name="parent">The parent for the actor.</param>
 /// <param name="props">The properties for the actor.</param>
 /// <param name="action">The action for the actor to execute.</param>
-let spawnNotPersisted parent props action = spawn parent props false action
+let spawnNotPersisted parent props action = spawn parent props false (fun () -> action)
 
 /// <summary>
 /// Creates and actor that runs the given action. If the actor crashes then it restarts from the last point where it
-/// was waiting for a message.
+/// was waiting for a message. NOTE: This function is deprecated, use Simple.Spawn.Checkpointed instead.
 /// </summary>
 /// <param name="parent">The parent for the actor.</param>
 /// <param name="props">The properties for the actor.</param>
 /// <param name="action">The action for the actor to execute.</param>
-let spawnCheckpointed parent props action = spawn parent props true action
+let spawnCheckpointed parent props action = spawn parent props true (fun () -> action)
 
 [<AutoOpen>]
 module Actions =
@@ -564,7 +594,7 @@ module Actions =
     let stash () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Stash ()))
     /// Unstashes the message at the front of the stash.
     let unstashOne () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.Unstash ()))
-    /// Unstashes all of the messages in the stash.
+    /// Unstashes all the messages in the stash.
     let unstashAll () : SimpleAction<unit> = Simple (fun ctx -> Done (ctx.Stash.UnstashAll ()))
 
     /// Strategy for dealing with "other messages" when using receive and sleep methods.

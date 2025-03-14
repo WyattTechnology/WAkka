@@ -33,25 +33,36 @@ module WAkka.Common
 open Akka.Event
 
 /// A logger tied to an actor.
-type Logger internal (ctx: Akka.Actor.IActorContext) =
-    let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
+type Logger (logger: ILoggingAdapter) =
 
-    /// Log the given message at the given level.
+    new (ctx: Akka.Actor.IActorContext) =
+        Logger (Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress()))
+
+    /// The underlying Akka.NET logger.
+    member _.Logger = logger
+    
+    /// Log the given message at the given level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Log level (msg: string) = logger.Log (level, msg)
 
-    ///Log the given exception.
+    ///Log the given exception. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.LogException (err: exn) = logger.Error err.Message
 
-    ///Log the given message at the debug level.
+    ///Log the given message at the debug level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Debug (msg: string) = logger.Debug msg
 
-    ///Log the given message at the info level.
+    ///Log the given message at the info level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Info (msg: string) = logger.Info msg
 
-    ///Log the given message at the warning level.
+    ///Log the given message at the warning level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Warning (msg: string) = logger.Warning msg
 
-    ///Log the given message at the error level.
+    ///Log the given message at the error level. In most cases it is better to use the methods of the Akka
+    /// ILoggingAdapter which can be obtained from the Logger property.
     member _.Error (msg: string) = logger.Error msg
 
 /// An actor context.
@@ -76,11 +87,11 @@ type IActorContext =
     /// Get an actor selection for the given actor path.
     abstract member ActorSelection: Akka.Actor.ActorPath -> Akka.Actor.ActorSelection
 
-/// A function the can be passed to the setRestartHandler action. The function is passed the actor context, the message
+/// A function that can be passed to the setRestartHandler action. The function is passed the actor context, the message
 /// that was being processed when the crash happened, and the exception that caused the crash.
 type RestartHandler = IActorContext * obj * exn -> unit
 
-/// A function the can be passed to the setPostStopHandler action. The function is passed the actor context.
+/// A function that can be passed to the setPostStopHandler action. The function is passed the actor context.
 type StopHandler = IActorContext -> unit
 
 type internal IActionContext =
@@ -104,7 +115,7 @@ type Props = {
     deploy: Option<Akka.Actor.Deploy>
     /// Specifies an alternate router type.
     router: Option<Akka.Routing.RouterConfig>
-    /// Specifies an alternate supervision strategy type for this actors children.
+    /// Specifies an alternate supervision strategy type for this actor's children.
     supervisionStrategy: Option<Akka.Actor.SupervisorStrategy>
 }
 with
@@ -164,13 +175,16 @@ module CommonActions =
     /// Gets the context for this actor. Normally, this should not be needed. All of its "safe" functionality can be invoked using actions.
     let unsafeGetActorCtx () = Simple (fun ctx -> Done (ctx :> IActorContext))
 
-    /// Gets the logger for this actor.
+    /// Gets the logger for this actor. In most cases it is better to use the methods of the Akka ILoggingAdapter which
+    /// can be obtained from getAkkaLogger instead of using this action.
     let getLogger () = Simple (fun ctx -> Done ctx.Logger)
-
+    /// Gets the Akka ILoggingAdapter for this actor.
+    let getAkkaLogger() = Simple (fun ctx -> Done ctx.Logger.Logger)
+    
     /// Stops this actor.
     let stop () =
-        // This weird dance is here so that the result of stop can adapt to the context that is it called in and
-        // we dont have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
+        // This weird dance is here so that the result of stop can adapt to the context that it is called in, and
+        // we don't have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
         // Action<'Result, 'a> is expected and 'Result is not unit.
         bindBase (fun () -> Done Unchecked.defaultof<'Result>) (Stop Done)
 
@@ -179,7 +193,7 @@ module CommonActions =
     let createChild (make: Akka.Actor.IActorRefFactory -> 'Result) =
         Simple (fun ctx -> Done (make ctx.ActorFactory))
 
-    /// Sends a the given message to the given actor. Also see the "<!" operator.
+    /// Sends the given message to the given actor. Also see the "<!" operator.
     let send (recv: Akkling.ActorRefs.IActorRef<'Msg>) msg = Simple (fun ctx -> Done (recv.Tell (msg, ctx.Self)))
 
     /// Watches the given actor for termination with this actor.

@@ -40,13 +40,13 @@ open Akkling
 open WAkka.Common
 open WAkka.Simple
 
-type ActorFunction = Akka.Actor.IActorRefFactory -> Props -> SimpleAction<unit> -> IActorRef<obj>
+type ActorFunction = Akka.Actor.IActorRefFactory * Props * (unit -> SimpleAction<unit>) -> IActorRef<obj>
 let actorFunctions : ActorFunction [] =
-    [|spawnNotPersisted; spawnCheckpointed|]
+    [|Spawn.NotPersisted; Spawn.Checkpointed|]
 
 type Msg = {value: int}
 
-let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+let tell (act: IActorRef<'Msg>) (msg: 'Msg) =
     act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
 
 [<Test>]
@@ -63,10 +63,10 @@ let ``spawn with name`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunct
                         | _ -> return! getMsg ()
                     }
                     getMsg ()
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         let m1 = {value = 1234}
         tell act m1
@@ -87,10 +87,10 @@ let ``spawn with no name`` ([<ValueSource("actorFunctions")>] makeActor: ActorFu
         let rec handle () =
             actor {
                 let! msg = Receive.Only<Msg> ()
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
-        let act = makeActor tk.Sys Props.Anonymous (handle ())
+        let act = makeActor(tk.Sys, Props.Anonymous, handle)
 
         let m1 = {value = 1234}
         tell act m1
@@ -111,13 +111,13 @@ let ``receive only ignores other messages by default`` ([<ValueSource("actorFunc
         let rec handle () =
             actor {
                 let! msg = Receive.Only<Msg> ()
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 let! other = Receive.Any (TimeSpan.FromMilliseconds 50.0)
                 if other.IsSome then
-                    do! ActorRefs.typed probe <! $"Got other message: {other.Value}"
+                    do! typed probe <! $"Got other message: {other.Value}"
                 return! handle ()
             }
-        let act = makeActor tk.Sys Props.Anonymous (handle ())
+        let act = makeActor(tk.Sys, Props.Anonymous, handle)
 
         tell (retype act) "This should be ignored"
         let m1 = {value = 1234}
@@ -133,12 +133,12 @@ let ``receive only with stash strategy stashes other messages`` ([<ValueSource("
         let rec handle () =
             actor {
                 let! msg = Receive.Only<Msg> stashOthers
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 let! other = Receive.Any ()
-                do! ActorRefs.typed probe <! other
+                do! typed probe <! other
                 return! handle ()
             }
-        let act = makeActor tk.Sys Props.Anonymous (handle ())
+        let act = makeActor(tk.Sys, Props.Anonymous, handle)
 
         let otherMsg = "This should be stash"
         tell (retype act) otherMsg
@@ -155,10 +155,10 @@ let ``receive filter only uses the filter`` ([<ValueSource("actorFunctions")>] m
         let rec handle () =
             actor {
                 let! msg = Receive.FilterOnly<Msg>(fun msg -> msg.value % 2 = 0)
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
-        let act = makeActor tk.Sys Props.Anonymous (handle ())
+        let act = makeActor(tk.Sys, Props.Anonymous, handle)
 
         let otherMsg = "This should be ignored"
         tell (retype act) otherMsg
@@ -176,10 +176,10 @@ let ``receive filter only uses the filter with timeout`` ([<ValueSource("actorFu
         let rec handle () =
             actor {
                 let! msg = Receive.FilterOnly<Msg>(TimeSpan.FromSeconds 10.0,  fun msg -> msg.value % 2 = 0)
-                do! ActorRefs.typed probe <! msg
+                do! typed probe <! msg
                 return! handle ()
             }
-        let act = makeActor tk.Sys Props.Anonymous (handle ())
+        let act = makeActor(tk.Sys, Props.Anonymous, handle)
 
         let otherMsg = "This should be ignored"
         tell (retype act) otherMsg
@@ -196,12 +196,16 @@ let ``receive any with timeout will timeout`` ([<ValueSource("actorFunctions")>]
 
         let expected = "test"
         
-        let _act = makeActor tk.Sys (Props.Named "test") (actor {
-           let! msg = Receive.Any(TimeSpan.FromMilliseconds 100.0)
-           match msg with
-           | Some _ -> do! ActorRefs.typed probe <! msg
-           | None -> do! ActorRefs.typed probe <! expected
-       })
+        let _act = makeActor(
+           tk.Sys,
+           Props.Named "test",
+           (fun () -> actor {
+               let! msg = Receive.Any(TimeSpan.FromMilliseconds 100.0)
+               match msg with
+               | Some _ -> do! typed probe <! msg
+               | None -> do! typed probe <! expected
+           })
+        )
         probe.ExpectNoMsg(TimeSpan.FromMilliseconds 100.0)
         let mutable tries = 0
         let mutable gotMsg = false
@@ -223,9 +227,9 @@ let ``get actor gives correct actor ref`` ([<ValueSource("actorFunctions")>] mak
         let rec handle () =
             actor {
                 let! act = getActor ()
-                do! ActorRefs.typed probe <! (untyped act)
+                do! typed probe <! (untyped act)
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -238,9 +242,9 @@ let ``map gives the correct result`` ([<ValueSource("actorFunctions")>] makeActo
             actor {
                 do! getActor() |> ignoreResult // just here to make sure that this type checks
                 let! act = getActor () |> mapResult (fun a -> Result<IActorRef<obj>, unit>.Ok a)
-                do! ActorRefs.typed probe <! act
+                do! typed probe <! act
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         let expected : Result<IActorRef<obj>, unit> = Ok act
         probe.ExpectMsg expected |> ignore
@@ -253,9 +257,9 @@ let ``get actor context gives correct actor`` ([<ValueSource("actorFunctions")>]
         let rec handle () =
             actor {
                 let! act = unsafeGetActorCtx ()
-                do! ActorRefs.typed probe <! act.Self
+                do! typed probe <! act.Self
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         probe.ExpectMsg (untyped act) |> ignore
 
@@ -270,9 +274,9 @@ let ``stop action stops the actor`` ([<ValueSource("actorFunctions")>] makeActor
                 let! _msg = Receive.Only<Msg> ()
                 do! stop ()
                 // The actor should stop on the previous line so this message should never be sent
-                do! ActorRefs.typed probe <! "should not get this"
+                do! typed probe <! "should not get this"
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         tk.Watch (untyped act) |> ignore
         let m1 = {value = 1234}
@@ -291,13 +295,13 @@ let ``create actor can create an actor`` ([<ValueSource("actorFunctions")>] make
                 let! newAct = createChild (fun parent ->
                     let ctx = parent :?> Akka.Actor.IActorContext
                     (typed probe).Tell(ctx.Self, ctx.Self)
-                    let typed : ActorRefs.IActorRef<Msg> = ActorRefs.retype self
+                    let typed : IActorRef<Msg> = retype self
                     typed
                 )
                 do! ActorRefs.typed probe <! (untyped newAct)
             }
-        let act : ActorRefs.IActorRef<Msg> =
-            makeActor tk.Sys (Props.Named "test") (handle ()) |> retype
+        let act : IActorRef<Msg> =
+            makeActor(tk.Sys, Props.Named "test", handle) |> retype
 
         probe.ExpectMsg (untyped act) |> ignore
         probe.ExpectMsg (untyped act) |> ignore
@@ -311,17 +315,17 @@ let ``unstash one only unstashes one message at a time`` ([<ValueSource("actorFu
             actor {
                 let! msg = Receive.Only<Msg> ()
                 if msg.value > 100 then
-                    do! ActorRefs.typed probe <! msg
+                    do! typed probe <! msg
                     do! unstashOne ()
                     return! handle true
                 elif unstashed then
-                    do! ActorRefs.typed probe <! msg
+                    do! typed probe <! msg
                     return! handle true
                 else
                     do! stash ()
                     return! handle false
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle false)
+        let act = makeActor(tk.Sys, Props.Named "test", (fun () -> handle false))
 
         let m1 = {value = 1}
         tell act m1
@@ -352,17 +356,17 @@ let ``unstash all unstashes all the messages`` ([<ValueSource("actorFunctions")>
             actor {
                 let! msg = Receive.Only<Msg> ()
                 if msg.value > 100 then
-                    do! ActorRefs.typed probe <! msg
+                    do! typed probe <! msg
                     do! unstashAll ()
                     return! handle true
                 elif unstashed then
-                    do! ActorRefs.typed probe <! msg
+                    do! typed probe <! msg
                     return! handle true
                 else
                     do! stash ()
                     return! handle false
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle false)
+        let act = makeActor(tk.Sys, Props.Named "test", (fun () -> handle false))
 
         let m1 = {value = 1}
         tell act m1
@@ -388,23 +392,23 @@ let ``watch works`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction)
             let! _ = Receive.Only<string> ()
             return ()
         }
-        let watched = makeActor tk.Sys (Props.Named "watched") (otherActor ())
+        let watched = makeActor(tk.Sys, Props.Named "watched", otherActor)
 
         let rec handle () =
             actor {
                 match! Receive.Any () with
-                | MessagePatterns.Terminated (act, _, _) ->
-                    do! ActorRefs.typed probe <!  (untyped act)
+                | Terminated (act, _, _) ->
+                    do! typed probe <!  (untyped act)
                     return! stop ()
                 | _msg ->
                     return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             do! watch watched
-            do! ActorRefs.typed probe <! ""
+            do! typed probe <! ""
             return! handle ()
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "" |> ignore
         tell (retype watched) ""
@@ -419,27 +423,27 @@ let ``unwatch works`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunctio
             let! _ = Receive.Only<string> ()
             return ()
         }
-        let watched = makeActor tk.Sys (Props.Named "watched") (otherActor ())
+        let watched = makeActor(tk.Sys, Props.Named "watched", otherActor)
 
         let rec handle () =
             actor {
                 match! Receive.Any () with
-                | MessagePatterns.Terminated (act, _, _) ->
-                    do! ActorRefs.typed probe <!  act
+                | Terminated (act, _, _) ->
+                    do! typed probe <!  act
                     return! stop ()
                 | :? string ->
                     do! unwatch watched
-                    do! ActorRefs.typed probe <! "unwatched"
+                    do! typed probe <! "unwatched"
                     return! handle ()
                 | _msg ->
                     return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             do! watch watched
-            do! ActorRefs.typed probe <! "watched"
+            do! typed probe <! "watched"
             return! handle ()
         }
-        let act = makeActor tk.Sys (Props.Named "test") start
+        let act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "watched" |> ignore
         tell (retype act) ""
@@ -455,14 +459,14 @@ let ``termination wait works`` ([<ValueSource("actorFunctions")>] makeActor: Act
         let rec otherActor () = actor {
             do! Receive.Only<string> () |> ignoreResult
         }
-        let watched = makeActor tk.Sys (Props.Named "watched") (otherActor ())
+        let watched = makeActor(tk.Sys, Props.Named "watched", otherActor)
 
-        let start = actor {
-            do! ActorRefs.typed probe <! ""
+        let start () = actor {
+            do! typed probe <! ""
             do! Termination.Wait(watched, stashOthers)            
-            do! ActorRefs.typed probe <! (untyped watched)
+            do! typed probe <! (untyped watched)
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "" |> ignore
         tell (retype watched) ""
@@ -476,7 +480,7 @@ let ``termination wait timeout works`` ([<ValueSource("actorFunctions")>] makeAc
         let rec otherActor () = actor {
             do! Receive.Only<string> () |> ignoreResult
         }
-        let watched = makeActor tk.Sys (Props.Named "watched") (otherActor ())
+        let watched = makeActor(tk.Sys, Props.Named "watched", otherActor)
 
         let readyMsg = "ready"
         let doneMsg = "OnDone called"
@@ -486,18 +490,18 @@ let ``termination wait timeout works`` ([<ValueSource("actorFunctions")>] makeAc
                     let! sender = getSender()
                     do! sender <! readyMsg
                 }
-                member _.OnDone () = actor {do! ActorRefs.typed probe <! doneMsg}
+                member _.OnDone () = actor {do! typed probe <! doneMsg}
         }
         let timeoutMsg = "time out"
-        let start = actor {
-            do! ActorRefs.typed probe <! ""
+        let start () = actor {
+            do! typed probe <! ""
             let! res = Termination.Wait(watched, TimeSpan.FromMilliseconds 100.0, others)
             if res then
-                do! ActorRefs.typed probe <! "Didn't time out"
+                do! typed probe <! "Didn't time out"
             else
-                do! ActorRefs.typed probe <! timeoutMsg
+                do! typed probe <! timeoutMsg
         }
-        let act = makeActor tk.Sys (Props.Named "test") start
+        let act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "" |> ignore
         let _msg = act.Ask("", None) |> Async.RunSynchronously
@@ -517,12 +521,12 @@ let ``schedule works`` ([<ValueSource("actorFunctions")>] makeActor: ActorFuncti
                 let! _msg = Receive.Any ()
                 return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             let! _cancel = schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
-            do! ActorRefs.typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -544,13 +548,13 @@ let ``scheduled messages can be cancelled`` ([<ValueSource("actorFunctions")>] m
                 let! _msg = Receive.Any ()
                 return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             let! cancel = schedule (TimeSpan.FromMilliseconds 100.0) (typed probe) "message"
             cancel.Cancel ()
-            do! ActorRefs.typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 100.0)
@@ -571,12 +575,12 @@ let ``schedule repeatedly works`` ([<ValueSource("actorFunctions")>] makeActor: 
                 let! _msg = Receive.Any ()
                 return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             let! _cancel = scheduleRepeatedly delay interval (typed probe) "message"
-            do! ActorRefs.typed probe <! "scheduled"
+            do! typed probe <! "scheduled"
             return! handle ()
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg "scheduled" |> ignore
         (tk.Sys.Scheduler :?> Akka.TestKit.TestScheduler).Advance (TimeSpan.FromMilliseconds 99.0)
@@ -598,7 +602,7 @@ let ``schedule repeatedly works`` ([<ValueSource("actorFunctions")>] makeActor: 
         probe.ExpectMsg "message" |> ignore
 
 [<Test>]
-let ``get sender get's the correct actor`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
+let ``get sender gets the correct actor`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -606,16 +610,16 @@ let ``get sender get's the correct actor`` ([<ValueSource("actorFunctions")>] ma
             actor {
                 let! _msg = Receive.Only<string> ()
                 let! sender = getSender ()
-                do! ActorRefs.typed probe <! (untyped sender)
+                do! typed probe <! (untyped sender)
                 return! handle ()
             }
-        let act = makeActor tk.Sys (Props.Named "test") (handle ())
+        let act = makeActor(tk.Sys, Props.Named "test", handle)
 
         act.Tell("message", probe)
         probe.ExpectMsg probe |> ignore
 
 [<Test>]
-let ``select get's the correct selection`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
+let ``select gets the correct selection`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
@@ -627,11 +631,11 @@ let ``select get's the correct selection`` ([<ValueSource("actorFunctions")>] ma
                 let! _msg = Receive.Only<string> ()
                 return! handle ()
             }
-        let start = actor {
+        let start () = actor {
             let! selection = select path
-            do! ActorRefs.typed probe <! selection
+            do! typed probe <! selection
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         let msg = probe.ExpectMsg<Akka.Actor.ActorSelection> ()
         msg.PathString |> shouldEqual (probeAct.Path.ToStringWithoutAddress())
@@ -642,7 +646,7 @@ let ``try without error gives correct results`` ([<ValueSource("actorFunctions")
         let probe = tk.CreateTestProbe "probe"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     return msg
@@ -652,7 +656,7 @@ let ``try without error gives correct results`` ([<ValueSource("actorFunctions")
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -663,7 +667,7 @@ let ``nested try without error gives correct results`` ([<ValueSource("actorFunc
         let probe = tk.CreateTestProbe "probe"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -677,7 +681,7 @@ let ``nested try without error gives correct results`` ([<ValueSource("actorFunc
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -689,7 +693,7 @@ let ``try with error after action gives correct results`` ([<ValueSource("actorF
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     let! _ = getActor ()
@@ -701,7 +705,7 @@ let ``try with error after action gives correct results`` ([<ValueSource("actorF
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -713,7 +717,7 @@ let ``nested try with error after action gives correct results`` ([<ValueSource(
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -729,7 +733,7 @@ let ``nested try with error after action gives correct results`` ([<ValueSource(
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -741,7 +745,7 @@ let ``try with error before action gives correct results`` ([<ValueSource("actor
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     doFail ()
@@ -752,7 +756,7 @@ let ``try with error before action gives correct results`` ([<ValueSource("actor
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -764,7 +768,7 @@ let ``nested try with error before action gives correct results`` ([<ValueSource
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -779,7 +783,7 @@ let ``nested try with error before action gives correct results`` ([<ValueSource
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -791,7 +795,7 @@ let ``nested try with error after action and error in handler after action gives
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -809,7 +813,7 @@ let ``nested try with error after action and error in handler after action gives
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -821,7 +825,7 @@ let ``nested try with error after action and error in handler before action give
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -838,7 +842,7 @@ let ``nested try with error after action and error in handler before action give
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -850,7 +854,7 @@ let ``nested try with error before action and error in handler after action give
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -867,7 +871,7 @@ let ``nested try with error before action and error in handler after action give
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -879,7 +883,7 @@ let ``nested try with error before action and error in handler before action giv
 
         let msg = "testing 1 2 3"
         let doFail () = failwith msg
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -895,7 +899,7 @@ let ``nested try with error before action and error in handler before action giv
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -908,7 +912,7 @@ let ``finally without error calls handler`` ([<ValueSource("actorFunctions")>] m
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     return msg
@@ -917,7 +921,7 @@ let ``finally without error calls handler`` ([<ValueSource("actorFunctions")>] m
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -930,7 +934,7 @@ let ``nested finally without error calls all handlers`` ([<ValueSource("actorFun
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -942,7 +946,7 @@ let ``nested finally without error calls all handlers`` ([<ValueSource("actorFun
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -956,7 +960,7 @@ let ``finally with error calls handler`` ([<ValueSource("actorFunctions")>] make
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -970,7 +974,7 @@ let ``finally with error calls handler`` ([<ValueSource("actorFunctions")>] make
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -983,7 +987,7 @@ let ``nested finally with error before actions calls all handlers`` ([<ValueSour
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -1000,7 +1004,7 @@ let ``nested finally with error before actions calls all handlers`` ([<ValueSour
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -1014,7 +1018,7 @@ let ``nested finally with error after actions calls all handlers`` ([<ValueSourc
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     try
@@ -1032,7 +1036,7 @@ let ``nested finally with error after actions calls all handlers`` ([<ValueSourc
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -1046,7 +1050,7 @@ let ``finally in with calls handler`` ([<ValueSource("actorFunctions")>] makeAct
         let final = tk.CreateTestProbe "final"
 
         let msg = "testing 1 2 3"
-        let start = actor {
+        let start () = actor {
             let! res = actor {
                 try
                     failwith msg
@@ -1061,7 +1065,7 @@ let ``finally in with calls handler`` ([<ValueSource("actorFunctions")>] makeAct
             }
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg msg |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -1081,11 +1085,11 @@ let ``using calls dispose`` ([<ValueSource("actorFunctions")>] makeActor: ActorF
             }
         }
 
-        let start = actor {
+        let start () = actor {
             use! disp = getDisposable ()
             do! typed probe <! disp
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg<IDisposable> () |> ignore
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
@@ -1097,13 +1101,13 @@ let ``for loop runs expected number of times`` ([<ValueSource("actorFunctions")>
         let probe = tk.CreateTestProbe "probe"
 
         let indexes = [1..10]
-        let start = actor {
+        let start () = actor {
             for i in indexes do
                 do! typed probe <! $"{i}"
             do! typed probe <! "done"
         }
         probe.ExpectNoMsg (TimeSpan.FromMilliseconds 100.0)
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         for i in indexes do
             probe.ExpectMsg $"{i}" |> ignore
@@ -1115,12 +1119,16 @@ let ``while loop runs as long as expected`` ([<ValueSource("actorFunctions")>] m
         let probe = tk.CreateTestProbe "probe"
         let mutable keepGoing = 0
         let mutable count = 0
-        let act = makeActor tk.Sys (Props.Named "test") (actor {
-           while keepGoing = 0 do
-               let! msg = Receive.Only<string> ()
-               System.Threading.Interlocked.Increment &count |> ignore
-               do! typed probe <! $"Got {msg}"
-        })
+        let act = makeActor(
+           tk.Sys,
+           Props.Named "test",
+           (fun () -> actor {
+               while keepGoing = 0 do
+                   let! msg = Receive.Only<string> ()
+                   System.Threading.Interlocked.Increment &count |> ignore
+                   do! typed probe <! $"Got {msg}"
+            })
+        )
         tk.Watch (untyped act) |> ignore
         for i in 1..10 do
             tellNow act $"{i}"
@@ -1145,7 +1153,7 @@ let ``execute while continues until done`` ([<ValueSource("actorFunctions")>] ma
     TestKit.testDefault <| fun tk ->
         let result = tk.CreateTestProbe "result"
 
-        let start = actor {
+        let start () = actor {
             do!
                 (fun i -> actor {
                     do! typed result <! WhileResult i
@@ -1157,7 +1165,7 @@ let ``execute while continues until done`` ([<ValueSource("actorFunctions")>] ma
                 })
             do! typed result <! WhileDoneResult
         }
-        let act = makeActor tk.Sys (Props.Named "test") start
+        let act = makeActor(tk.Sys, Props.Named "test", start)
 
         for i in 0 .. 10 do
             tellNow act (WhileValue i)
@@ -1170,11 +1178,11 @@ let ``map array process all elements`` ([<ValueSource("actorFunctions")>] makeAc
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = actor {
+        let start () = actor {
             let! res =  [|1; 2; 3|] |> mapArray (fun i -> actor{return (i + 1)})
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg [|2; 3; 4|] |> ignore
 
@@ -1183,11 +1191,11 @@ let ``map list process all elements`` ([<ValueSource("actorFunctions")>] makeAct
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = actor {
+        let start () = actor {
             let! res =  [1; 2; 3] |> mapList (fun i -> actor{return (i + 1)})
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg [2; 3; 4] |> ignore
 
@@ -1197,12 +1205,12 @@ let ``foldActions processes all elements`` ([<ValueSource("actorFunctions")>] ma
         let probe = tk.CreateTestProbe "probe"
 
         let values = [1; 2; 3]
-        let start = actor {
+        let start () = actor {
             let actions = values |> List.map actor.Return
             let! res =  (0, actions) ||> foldActions (fun i r -> actor{return (r + i)})
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg (List.sum values) |> ignore
 
@@ -1212,11 +1220,11 @@ let ``foldValues processes all elements`` ([<ValueSource("actorFunctions")>] mak
         let probe = tk.CreateTestProbe "probe"
 
         let values = [1; 2; 3]
-        let start = actor {
+        let start () = actor {
             let! res =  (0, values) ||> foldValues (fun i r -> actor{return (r + i)})
             do! typed probe <! res
         }
-        let _act = makeActor tk.Sys (Props.Named "test") start
+        let _act = makeActor(tk.Sys, Props.Named "test", start)
 
         probe.ExpectMsg (List.sum values) |> ignore
 
@@ -1225,12 +1233,12 @@ let ``sleep with stashing stashes messages`` ([<ValueSource("actorFunctions")>] 
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = actor {
+        let start () = actor {
             do! sleep (TimeSpan.FromSeconds 1.0) stashOthers
             let! msg = Receive.Only<string>()
             do! typed probe <! $"got: {msg}"
         }
-        let act = makeActor tk.Sys (Props.Named "test") start
+        let act = makeActor(tk.Sys, Props.Named "test", start)
 
         let msg = "testing 1 2 3"
         tellNow act msg
@@ -1243,12 +1251,12 @@ let ``sleep with ignoring ignores messages`` ([<ValueSource("actorFunctions")>] 
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = actor {
+        let start () = actor {
             do! sleep (TimeSpan.FromSeconds 1.0) ignoreOthers
             let! msg = Receive.Only<string>()
             do! typed probe <! $"got: {msg}"
         }
-        let act = makeActor tk.Sys (Props.Named "test") start
+        let act = makeActor(tk.Sys, Props.Named "test", start)
 
         let msg = "testing 1 2 3"
         tellNow act msg
@@ -1277,7 +1285,7 @@ let ``crash handlers are invoked if actor crashes`` ([<ValueSource("actorFunctio
             failwith "crashed"
             return! handle ()
         }
-        let crashStart = actor {
+        let crashStart () = actor {
             let! _ = setRestartHandler (fun (_ctx, msg, err) ->
                 tell (typed probe) {id = 1; msg = msg; err = err}
             )
@@ -1286,21 +1294,21 @@ let ``crash handlers are invoked if actor crashes`` ([<ValueSource("actorFunctio
             )
             return! crashHandle ()
         }
-        let start = actor {
+        let start () = actor {
             let! crasher =
                 createChild (fun f ->
-                    makeActor f (Props.Named "crasher") crashStart
+                    makeActor(f, Props.Named "crasher", crashStart)
                 )
-            do! ActorRefs.typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = makeActor tk.Sys parentProps start
+        let _parent = makeActor(tk.Sys, parentProps, start)
 
-        let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
+        let crasher = probe.ExpectMsg<IActorRef<obj>> ()
         tell (retype crasher) "crash it"
         let res = probe.ExpectMsg<CrashMsg>()
         res.id |> shouldEqual 1
@@ -1322,7 +1330,7 @@ let ``crash handler is not invoked if handler is cleared`` ([<ValueSource("actor
             failwith "crashed"
             return! handle ()
         }
-        let crashStart = actor {
+        let crashStart () = actor {
             let! id = setRestartHandler (fun (_ctx, msg, err) ->
                 tell (typed probe) {id = 1; msg = msg; err = err}
             )
@@ -1333,21 +1341,21 @@ let ``crash handler is not invoked if handler is cleared`` ([<ValueSource("actor
             return! crashHandle()
         }
 
-        let start = actor {
+        let start () = actor {
             let! crasher =
                 createChild (fun f ->
-                    makeActor f (Props.Named "crasher") crashStart
+                    makeActor(f, Props.Named "crasher", crashStart)
                 )
-            do! ActorRefs.typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = makeActor tk.Sys parentProps start
+        let _parent = makeActor(tk.Sys, parentProps, start)
 
-        let crasher = probe.ExpectMsg<ActorRefs.IActorRef<obj>> ()
+        let crasher = probe.ExpectMsg<IActorRef<obj>> ()
         tell (retype crasher) "crash it"
         let res = probe.ExpectMsg<CrashMsg>()
         res.id |> shouldEqual 2
@@ -1364,7 +1372,7 @@ let ``stop handlers are invoked if actor stops`` ([<ValueSource("actorFunctions"
             let! _  = Receive.Only<string> ()
             return! stop ()
         }
-        let start = actor {
+        let start () = actor {
             let! _ = setStopHandler (fun _ctx ->
                 tell (typed probe) {id = 1}
             )
@@ -1373,7 +1381,7 @@ let ``stop handlers are invoked if actor stops`` ([<ValueSource("actorFunctions"
             )
             return! handle ()
         }
-        let actor = makeActor tk.Sys (Props.Named "stopper") start
+        let actor = makeActor(tk.Sys, Props.Named "stopper", start)
 
         tell (retype actor) "stop it"
         let res = probe.ExpectMsg<StopMsg>()
@@ -1390,7 +1398,7 @@ let ``stop handler is not invoked if handler is cleared`` ([<ValueSource("actorF
             let! _  = Receive.Only<string> ()
             return! stop ()
         }
-        let start = actor {
+        let start () = actor {
             let! id = setStopHandler (fun _ctx ->
                 tell (typed probe) {id = 1}
             )
@@ -1400,7 +1408,7 @@ let ``stop handler is not invoked if handler is cleared`` ([<ValueSource("actorF
             do! clearStopHandler id
             return! handle ()
         }
-        let actor = makeActor tk.Sys (Props.Named "stopper") start
+        let actor = makeActor(tk.Sys, Props.Named "stopper", start)
 
         tell (retype actor) "stop it"
         let res = probe.ExpectMsg<StopMsg>()
@@ -1412,11 +1420,11 @@ let ``use HandleMessages at top-level`` ([<ValueSource("actorFunctions")>] makeA
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = Receive.HandleMessages (fun msg ->
+        let start () = Receive.HandleMessages (fun msg ->
             tell (typed probe) msg
             HandleMessagesResult.IsDone ()
         )
-        let actor = makeActor tk.Sys (Props.Named "stopper") start
+        let actor = makeActor(tk.Sys, Props.Named "stopper", start)
         tk.Watch (untyped actor) |> ignore
         
         tell (retype actor) "stop it"
@@ -1428,12 +1436,12 @@ let ``use HandleMessages with context at top-level`` ([<ValueSource("actorFuncti
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = Receive.HandleMessages (fun ctx msg ->
+        let start () = Receive.HandleMessages (fun ctx msg ->
             tell (typed probe) $"act: {ctx.GetSelf()}"
             tell (typed probe) msg
             HandleMessagesResult.IsDone ()
         )
-        let actor = makeActor tk.Sys (Props.Named "stopper") start
+        let actor = makeActor(tk.Sys, Props.Named "stopper", start)
         tk.Watch (untyped actor) |> ignore
         
         tell (retype actor) "stop it"
@@ -1446,11 +1454,11 @@ let ``use HandleMessages, continue with no state changes`` ([<ValueSource("actor
     TestKit.testDefault <| fun tk ->
         let probe = tk.CreateTestProbe "probe"
 
-        let start = Receive.HandleMessages (fun msg ->
+        let start () = Receive.HandleMessages (fun msg ->
             tell (typed probe) msg
             HandleMessagesResult.Continue
         )
-        let actor = makeActor tk.Sys (Props.Named "stopper") start
+        let actor = makeActor(tk.Sys, Props.Named "stopper", start)
 
         for i in 0 .. 10 do    
             tell (retype actor) $"{i}"
@@ -1469,7 +1477,7 @@ let ``use HandleMessages, continue with state changes`` ([<ValueSource("actorFun
             tell (typed probe) $"{msg.i}/{newAcc}"
             HandleMessagesResult.ContinueWith (handle newAcc)
             
-        let actor = makeActor tk.Sys (Props.Named "stopper") (Receive.HandleMessages (handle 0))
+        let actor = makeActor(tk.Sys, Props.Named "stopper", (fun () -> Receive.HandleMessages (handle 0)))
 
         for i in 0 .. 10 do    
             tell (retype actor) {i = i}
@@ -1489,7 +1497,7 @@ let ``use HandleMessages, continue with action`` ([<ValueSource("actorFunctions"
                 do! typed probe <! {i = msg1.i + msg2.i}
             }) 
             
-        let actor = makeActor tk.Sys (Props.Named "stopper") (Receive.HandleMessages handle)
+        let actor = makeActor(tk.Sys, Props.Named "stopper", (fun () -> Receive.HandleMessages handle))
         tk.Watch (untyped actor) |> ignore
 
         let i1 = 12
@@ -1510,7 +1518,7 @@ let ``HandleMessages ignores incorrect message type`` ([<ValueSource("actorFunct
             tell (typed probe) $"{msg.i}/{newAcc}"
             HandleMessagesResult.ContinueWith (handle newAcc)
             
-        let actor = spawn tk.Sys (Props.Named "stopper") (Receive.HandleMessages (handle 0))
+        let actor = spawn(tk.Sys, Props.Named "stopper", (fun () -> Receive.HandleMessages (handle 0)))
 
         for i in 0 .. 10 do    
             tell (retype actor) {i = i}
@@ -1530,10 +1538,11 @@ let ``HandleMessages gives correct result when used in actor expression`` ([<Val
             | Some prev -> HandleMessagesResult.IsDone (prev.i + msg.i)
             | None -> HandleMessagesResult.ContinueWith (handle (Some msg))
             
-        let actor = spawn tk.Sys (Props.Named "stopper") (actor {
-           let! res = Receive.HandleMessages (handle None)
-           do! typed probe <! {i = res}
-       })
+        let actor = spawn(tk.Sys, Props.Named "stopper", (fun () -> actor {
+               let! res = Receive.HandleMessages (handle None)
+               do! typed probe <! {i = res}
+           })
+        )
         tk.Watch (untyped actor) |> ignore
 
         let i1 = 12

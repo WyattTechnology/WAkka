@@ -37,7 +37,7 @@ open Akkling
 open WAkka.Common
 open WAkka.Simple
 
-let tell (act: ActorRefs.IActorRef<'Msg>) (msg: 'Msg) =
+let tell (act: IActorRef<'Msg>) (msg: 'Msg) =
     act.Tell(msg, Akka.Actor.ActorRefs.NoSender)
 
 type CrashMsg = {
@@ -56,14 +56,14 @@ let ``state is recovered after a crash`` () =
             match! Receive.Any () with
             | :? string as msg ->
                 let newRecved = msg :: recved
-                do! ActorRefs.typed probe <! String.concat "," newRecved
+                do! typed probe <! String.concat "," newRecved
                 return! crashHandle newRecved
             | :? CrashIt ->
                 failwith "crashing"
             | _ ->
                 return! crashHandle recved
         }
-        let crashStart = actor {
+        let crashStart () = actor {
             let! _ = setRestartHandler (fun (_ctx, msg, err) ->
                 tell (typed probe) {msg = msg; err = err}
             )
@@ -75,21 +75,21 @@ let ``state is recovered after a crash`` () =
             return! handle ()
         }
 
-        let start = actor {
+        let start () = actor {
             let! crasher =
                 createChild (fun f ->
-                    spawnCheckpointed f (Props.Named "crasher") crashStart
+                    Spawn.Checkpointed(f, Props.Named "crasher", crashStart)
                 )
-            do! ActorRefs.typed probe <! crasher
+            do! typed probe <! crasher
             return! handle ()
         }
         let parentProps = {
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = spawnCheckpointed tk.Sys parentProps start
+        let _parent = Spawn.Checkpointed(tk.Sys, parentProps, start)
 
-        let crasher : ActorRefs.IActorRef<string> = ActorRefs.retype (probe.ExpectMsg<ActorRefs.IActorRef<obj>> ())
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"
         tell crasher msg1
         probe.ExpectMsg msg1 |> ignore
