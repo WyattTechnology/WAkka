@@ -75,8 +75,8 @@ see [below](#handlemessages)).
 ## Usage
 
 WAkka is built on top of Akka.NET and Akkling. It uses the typed actor references from Akkling, and
-the general infrastructure from Akka.NET. The actor system should be started as though you're using
-Akkling. Then, the creation of actors should be done as shown below.
+the general infrastructure from Akka.NET. The actor system can be started in any of the usual ways,
+including the use of Akka.Hosting. Then, the creation of actors should be done as shown below.
 
 Note that the Akkling `<!` (*tell* operator) can cause unexpected behavior in WAkka computation
 expressions. In order to avoid this, WAkka also overrides this operator to behave properly in
