@@ -28,6 +28,9 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
   <ItemGroup>
+    <None Include="../../readme.md" Pack="true" PackagePath="" />
+  </ItemGroup>
+  <ItemGroup>
     <Compile Include="Common.fs" />
     <Compile Include="LifeCycleHandlers.fs" />
     <Compile Include="Simple.fs" />
