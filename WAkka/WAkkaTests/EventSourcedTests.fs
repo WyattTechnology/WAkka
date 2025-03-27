@@ -763,8 +763,6 @@ let ``state is recovered after a crash when using persistSkippable`` () =
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
         events.ExpectMsg PersistResult<string>.RecoveryDone |> ignore
 
-// TODO: make persistSkippableSimple and add tests to Snapshot tests ***********************************************
-
 [<Test>]
 let ``state is recovered after a crash with simple persist`` () =
     TestKit.testDefault <| fun tk ->
