@@ -523,14 +523,21 @@ module Actions =
         /// result is needed.  
         | RecoveryDone
     
+    /// <summary>
+    /// <para>
     /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
-    /// action and return the persisted result instead. This version of persist will return persistence lifecycle events
+    /// action and return the persisted result instead.
+    /// </para>
+    /// <para>
+    /// This version of persist will return persistence lifecycle events
     /// in addition to the results of the action passed to persist. If something other than ActionResult is returned then
     /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
     /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
     /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
     /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned.
     /// If persisting an event fails, then the failure will be logged and the actor will stop.  
+    /// </para>
+    /// </summary>
     let persist (action: Simple.SimpleAction<'Result>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObj (Simple.actor {
@@ -551,6 +558,25 @@ module Actions =
         }
         getEvt ()
 
+    /// <summary>
+    /// <para>
+    /// Runs the given SimpleAction and if it evaluates to `SkippableEvent.Persist value`, then `value` is persisted and
+    /// becomes the value of the persistSkippable action. If action evaluates to `Skippable.SkipPersist value`, then
+    /// `value` becomes the result of the persistSkippable action but is not persisted. If the actor crashes, this
+    /// action will skip running the action and return the persisted result instead. Note that if events were skipped
+    /// in the initial run, they will not be present in the stream of events during recovery. It is up to the caller
+    /// to structure things so that this will not be a problem. 
+    /// </para>
+    /// <para>
+    /// This version of persist will return persistence lifecycle events
+    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned then
+    /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
+    /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
+    /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
+    /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned.
+    /// If persisting an event fails, then the failure will be logged and the actor will stop.  
+    /// </para>
+    /// </summary>
     let persistSkippable (action: Simple.SimpleAction<SkippableEvent<'Result>>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObjSkippable (Simple.actor {
@@ -571,11 +597,18 @@ module Actions =
         }
         getEvt ()
 
+    /// <summary>
+    /// <para>
     /// Runs the given SimpleAction and then persists the result. If the actor crashes, this action will skip running the
-    /// action and return the persisted result instead. This version of persist will not return persistence lifecycle
+    /// action and return the persisted result instead.
+    /// </para>
+    /// <para>
+    /// This version of persist will not return persistence lifecycle
     /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
     /// If a result is produced then it was either read from the event log if recovering or the product of executing the
     /// action if not recovering. Unlike persist, persistSimple will always execute its action.
+    /// </para>
+    /// </summary>
     let persistSimple (action: Simple.SimpleAction<'Result>): EventSourcedActionBase<'Result, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObj (Simple.actor {
@@ -597,6 +630,22 @@ module Actions =
         }
         getEvt ()
 
+    /// <summary>
+    /// <para>
+    /// Runs the given SimpleAction and if it evaluates to `SkippableEvent.Persist value`, then `value` is persisted and
+    /// becomes the value of the persistSkippable action. If action evaluates to `Skippable.SkipPersist value`, then
+    /// `value` becomes the result of the persistSkippable action but is not persisted. If the actor crashes, this
+    /// action will skip running the action and return the persisted result instead. Note that if events were skipped
+    /// in the initial run, they will not be present in the stream of events during recovery. It is up to the caller
+    /// to structure things so that this will not be a problem. 
+    /// </para>
+    /// <para>
+    /// This version of persist will not return persistence lifecycle
+    /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
+    /// If a result is produced then it was either read from the event log if recovering or the product of executing the
+    /// action if not recovering. Unlike persist, persistSimple will always execute its action.
+    /// </para>
+    /// </summary>
     let persistSkippableSimple (action: Simple.SimpleAction<SkippableEvent<'Result>>): EventSourcedActionBase<'Result, 'Snapshot> =
         let rec getEvt () = actor {
             let! evt = persistObjSkippable (Simple.actor {
