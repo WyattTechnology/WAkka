@@ -61,8 +61,14 @@ type ISnapshotControl =
     /// The actor's logger.
     abstract member Logger: ILoggingAdapter
     
-type EventSourcedExtra<'Snapshot> =
+type internal ISkippableEvent =
+    abstract member Skip: bool
+    abstract member Value: obj    
+
+type EventSourcedExtra<'Snapshot> = 
+    internal
     | RunAction of action:Simple.SimpleAction<obj>
+    | RunSkippableAction of action:Simple.SimpleAction<ISkippableEvent>
     | GetRecovering
     | Snapshot of snapshot:'Snapshot
     | AddSnapshotResultHandler of handler:(ISnapshotControl * SnapshotResult -> bool)
@@ -106,10 +112,6 @@ module private EventSourcedActorPrivate =
         | Rejected of result:obj * reason:exn * sequenceNr:int64
 
 open EventSourcedActorPrivate
-
-type internal ISkippableEvent =
-    abstract member Skip: bool
-    abstract member Value: obj
     
 type SkippableEvent<'T> =
     | Persist of value:'T
@@ -193,6 +195,16 @@ module Internal =
                     else
                         let onDone (res: obj) =
                             rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
+                            this.Persist (res, fun evt -> handleActions false (next evt))
+                        let setMsgHandler (handler: Simple.IMessageHandler) =
+                            updateMsgHandler (fun _ m -> handler.HandleMessage m)
+                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
+                | RunSkippableAction subAction ->
+                    if recovering then
+                        updateMsgHandler (fun stillRecovering msg -> handleActions stillRecovering (next msg))
+                    else
+                        let onDone (res: obj) =
+                            rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
                             match res with
                             | :? ISkippableEvent as p ->
                                 if p.Skip then
@@ -202,10 +214,14 @@ module Internal =
                                         handleActions false (next evt)
                                     )
                             | _ -> 
-                                this.Persist (res, fun evt -> handleActions false (next evt))
+                                failwith "Result was not ISkippableEvent"
                         let setMsgHandler (handler: Simple.IMessageHandler) =
                             updateMsgHandler (fun _ m -> handler.HandleMessage m)
-                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
+                        let subAction' = Simple.actor {
+                            let! r = subAction
+                            return r :> obj
+                        }
+                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction')
                 | GetRecovering ->
                     handleActions recovering (next recovering)
                 | Snapshot snapshot ->
@@ -494,6 +510,8 @@ module Actions =
 
     let private persistObj (action: Simple.SimpleAction<obj>): EventSourcedActionBase<obj, 's> =
         Extra (RunAction action, Done)        
+    let private persistObjSkippable (action: Simple.SimpleAction<ISkippableEvent>): EventSourcedActionBase<obj, 's> =
+        Extra (RunSkippableAction action, Done)        
     
     /// The result of applying "persist" to a SimpleAction.
     type PersistResult<'Result> =
@@ -535,9 +553,9 @@ module Actions =
 
     let persistSkippable (action: Simple.SimpleAction<SkippableEvent<'Result>>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
         let rec getEvt () = actor {
-            let! evt = persistObj (Simple.actor {
+            let! evt = persistObjSkippable (Simple.actor {
                 let! res = action
-                return (res :> obj)
+                return (res :> ISkippableEvent)
             })
             match evt with
             | :? 'Result as res ->
@@ -563,6 +581,27 @@ module Actions =
             let! evt = persistObj (Simple.actor {
                 let! res = action
                 return (res :> obj)
+            })
+            match evt with
+            | :? 'Result ->
+                return (evt :?> 'Result)
+            | :? PersistenceMsg as recovery ->
+                match recovery with
+                | Completed ->
+                    return! getEvt ()
+                | Rejected _ ->
+                    //already logged the error in OnRecoveryFailed
+                    return! stop ()
+            | _ ->
+                return! getEvt ()
+        }
+        getEvt ()
+
+    let persistSkippableSimple (action: Simple.SimpleAction<SkippableEvent<'Result>>): EventSourcedActionBase<'Result, 'Snapshot> =
+        let rec getEvt () = actor {
+            let! evt = persistObjSkippable (Simple.actor {
+                let! res = action
+                return (res :> ISkippableEvent)
             })
             match evt with
             | :? 'Result ->

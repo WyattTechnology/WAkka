@@ -822,6 +822,71 @@ let ``state is recovered after a crash with simple persist`` () =
         crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
         probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
 
+[<Test>]
+let ``state is recovered after a crash with skippable simple persist`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let msgSkip = "skip"
+        let rec crashHandle recved = actor {
+            let! msg = persistSkippableSimple(
+                let rec loop () = Simple.actor{
+                    match! Receive.Any() with
+                    | :? string as msg ->
+                        let newRecved = msg :: recved
+                        do! typed probe <! String.concat "," newRecved
+                        if msg <> msgSkip then 
+                            return SkippableEvent.Persist msg
+                        else 
+                            return SkippableEvent.SkipPersist msg
+                    | :? CrashIt ->
+                        return failwith "Crashing"
+                    | _ ->
+                        return! loop ()
+                }
+                loop ()
+            )
+            return! crashHandle (msg :: recved)
+        }
+        let crashStart () = actor {
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                (typed probe).Tell({msg = msg; err = err}, Akka.Actor.ActorRefs.NoSender)
+            )
+            return! crashHandle []
+        }
+
+        let start () = Simple.actor {
+            let! crasher =
+                createChild (fun f ->
+                    Spawn.NoSnapshots(f, EventSourcedProps.Named "crasher", crashStart)
+                )
+            do! typed probe <! crasher
+            let! _ = Receive.Any ()
+            return ()
+        }
+        let parentProps = {
+            Common.Props.Named "parent" with
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = Simple.Spawn.NotPersisted(tk.Sys, parentProps, start)
+
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
+        let msg1 = "1"
+        crasher.Tell(msg1, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg msg1 |> ignore
+        crasher.Tell(msgSkip, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msgSkip},{msg1}"|> ignore
+        let msg2 = "2"
+        crasher.Tell(msg2, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msg2},{msgSkip},{msg1}"|> ignore
+        crasher.Tell(msgSkip, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msgSkip},{msg2},{msgSkip},{msg1}"|> ignore
+        (retype crasher).Tell(CrashIt, Akka.Actor.ActorRefs.NoSender)
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg3 = "3"
+        crasher.Tell(msg3, Akka.Actor.ActorRefs.NoSender)
+        probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
+
 let recoveryTestAction probe () = actor {
     let! res1 = isRecovering ()
     if res1 then
