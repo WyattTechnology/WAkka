@@ -107,6 +107,24 @@ module private EventSourcedActorPrivate =
 
 open EventSourcedActorPrivate
 
+type internal ISkippableEvent =
+    abstract member Skip: bool
+    abstract member Value: obj
+    
+type SkippableEvent<'T> =
+    | Persist of value:'T
+    | SkipPersist of value:'T
+with 
+    interface ISkippableEvent with
+        member this.Skip =
+            match this with
+            | Persist _ -> false
+            | SkipPersist _ -> true
+        member this.Value =
+            match this with
+            | Persist value -> value :> obj
+            | SkipPersist value -> value :> obj
+
 module Internal = 
     type IActionHandler<'Snapshot> =
         abstract member SnapshotHandler: Option<obj> -> EventSourcedActionBase<unit, 'Snapshot>
@@ -173,9 +191,18 @@ module Internal =
                     if recovering then
                         updateMsgHandler (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                     else
-                        let onDone res =
+                        let onDone (res: obj) =
                             rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
-                            this.Persist (res, fun evt -> handleActions false (next evt))
+                            match res with
+                            | :? ISkippableEvent as p ->
+                                if p.Skip then
+                                    handleActions false (next p.Value)
+                                else
+                                    this.Persist (p.Value, fun evt ->
+                                        handleActions false (next evt)
+                                    )
+                            | _ -> 
+                                this.Persist (res, fun evt -> handleActions false (next evt))
                         let setMsgHandler (handler: Simple.IMessageHandler) =
                             updateMsgHandler (fun _ m -> handler.HandleMessage m)
                         Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
@@ -495,6 +522,26 @@ module Actions =
             match evt with
             | :? 'Result ->
                 return ActionResult (evt :?> 'Result)
+            | :? PersistenceMsg as pMsg ->
+                match pMsg with
+                | Completed ->
+                    return RecoveryDone
+                | Rejected(result, reason, sequenceNr) ->
+                    return ActionResultRejected (result :?> 'Result, reason, sequenceNr)
+            | _ ->
+                return! getEvt ()
+        }
+        getEvt ()
+
+    let persistSkippable (action: Simple.SimpleAction<SkippableEvent<'Result>>): EventSourcedActionBase<PersistResult<'Result>, 'Snapshot> =
+        let rec getEvt () = actor {
+            let! evt = persistObj (Simple.actor {
+                let! res = action
+                return (res :> obj)
+            })
+            match evt with
+            | :? 'Result as res ->
+                return ActionResult res //(evt :?> 'Result)
             | :? PersistenceMsg as pMsg ->
                 match pMsg with
                 | Completed ->
