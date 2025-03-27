@@ -2,9 +2,9 @@
   <PropertyGroup>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <TargetFrameworks>netstandard2.0;netstandard2.1;net6.0</TargetFrameworks>
-    <PackageVersion>1.5.1</PackageVersion>
-    <AssemblyVersion>1.5.1</AssemblyVersion>
-    <FileVersion>1.5.1</FileVersion>
+    <PackageVersion>1.5.2</PackageVersion>
+    <AssemblyVersion>1.5.2</AssemblyVersion>
+    <FileVersion>1.5.2</FileVersion>
     <Authors>Wyatt Technology</Authors>
     <PackageLicenseExpression>BSD-3-Clause</PackageLicenseExpression>
     <PackageReadmeFile>readme.md</PackageReadmeFile>
