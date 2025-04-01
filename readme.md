@@ -181,7 +181,7 @@ the `Spawn` class in the `WAkka.Simple` and `WAkka.EventSourced` modules should 
 #### Alternate spawning via actor classes
 
 In most cases, starting actors using the *spawn methods* shown above should be sufficient. But in
-some cases (e.g., remote deployment or cluster sharding), we need to implement the actor using a
+some cases (e.g., remote deployment), we need to implement the actor using a
 class derived from `Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka
 provides a way to do this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`
 `WAkka.EventSourced.EventSourcedActor` and `WAkka.EventSourced.EventSourcedSnapshotActor` classes
