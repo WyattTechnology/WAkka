@@ -181,9 +181,9 @@ the `Spawn` class in the `WAkka.Simple` and `WAkka.EventSourced` modules should 
 #### Alternate spawning via actor classes
 
 In most cases, starting actors using the *spawn methods* shown above should be sufficient. But in
-some cases (e.g., remote deployment), we need to implement the actor using a class derived from
-`Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka provides a way to do
-this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`,
+some cases (e.g., remote deployment), we need to implement the actor using a
+class derived from `Akka.Actor.ActorBase` so that we can put a type into `Akka.Actor.Props`. WAkka
+provides a way to do this via the `WAkka.Simple.NotPersistedActor`, `WAkka.Simple.CheckpointedActor`
 `WAkka.EventSourced.EventSourcedActor` and `WAkka.EventSourced.EventSourcedSnapshotActor` classes
 that correspond to *not persisted*, *checkpointed*, *persistent (no snapshots)*, and *persistent (
 with snapshots)* actor types respectively. One derives a class from the appropriate base class for
@@ -472,10 +472,18 @@ Spawn.NoSnapshots` or `EventSourced.Spawn.WithSnapshots`).
   is a `PersistResult` which is either the result of the action, or a lifecycle event (recovery
   finished, recovery failed, or the result of the simple action was rejected by the persistence
   system).
+* `persistSkippable`: Similar to `persist`, but `SkippableEvent<'T>` must be returned. If
+  `SkippableEvent.Persist value` is used, then `value` will be persisted and returned. If
+  `SkippableEvent.SkipPersist value` is used, then `value` will be returned, but it will not be
+  persisted. During recovery, only the events that used `SkippableEvent.Persist` will be returned.
 * `persistSimple`: Run the given simple action and persist the result. When the actor is recovering
   from a crash the simple action is skipped and the persisted result is returned. Just the result of
   the simple action is returned, persistence lifecycle events are filtered out. If an action result
   is rejected by the persistence system or recovery fails then the actor will be stopped.
+* `persistSkippableSimple`: Similar to `persistSimple`, but `SkippableEvent<'T>` must be returned. If
+  `SkippableEvent.Persist value` is used, then `value` will be persisted and returned. If
+  `SkippableEvent.SkipPersist value` is used, then `value` will be returned, but it will not be
+  persisted. During recovery, only the events that used `SkippableEvent.Persist` will be returned.
 * `isRecovering`: Gets whether the actor is currently recovering or not.
 
 To make the stateful example above work as an event sourced actor we would do:
