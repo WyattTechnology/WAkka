@@ -30,6 +30,7 @@
 
 module WAkkaTests.CheckpointedTests
 
+open System
 open NUnit.Framework
 
 open Akkling
@@ -70,35 +71,37 @@ let ``state is recovered after a crash`` () =
             return! crashHandle []
         }
 
-        let rec handle () = actor {
-            let! _  = Receive.Any ()
-            return! handle ()
-        }
-
         let start () = actor {
             let! crasher =
                 createChild (fun f ->
                     Spawn.Checkpointed(f, Props.Named "crasher", crashStart)
                 )
             do! typed probe <! crasher
-            return! handle ()
+            return! Receive.Any() |> ignoreResult
         }
         let parentProps = {
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Spawn.Checkpointed(tk.Sys, parentProps, start)
+        let _parent = Spawn.NotPersisted(tk.Sys, parentProps, start)
 
-        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
-        let msg1 = "1"
-        tell crasher msg1
-        probe.ExpectMsg msg1 |> ignore
-        let msg2 = "2"
-        tell crasher msg2
-        probe.ExpectMsg $"{msg2},{msg1}"|> ignore
-        tell (retype crasher) CrashIt
-        let _res = probe.ExpectMsg<CrashMsg>()
-        let msg3 = "3"
-        tell crasher msg3
-        probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
+        tk.Within(TimeSpan.FromMinutes 10.0, fun _ ->
+            let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
+            let msg1 = "1"
+            tell crasher msg1
+            probe.ExpectMsg msg1 |> ignore
+            let msg2 = "2"
+            tell crasher msg2
+            probe.ExpectMsg $"{msg2},{msg1}"|> ignore
+            tell (retype crasher) CrashIt
+            let _res = probe.ExpectMsg<CrashMsg>(TimeSpan.FromMinutes 1.0)
+            let msg3 = "3"
+            tell crasher msg3
+            probe.ExpectMsg ($"{msg3},{msg2},{msg1}", TimeSpan.FromMinutes 1.0)|> ignore
+            tell (retype crasher) CrashIt
+            let _res = probe.ExpectMsg<CrashMsg>(TimeSpan.FromMinutes 1.0)
+            let msg4 = "4"
+            tell crasher msg4
+            probe.ExpectMsg ($"{msg4},{msg3},{msg2},{msg1}", TimeSpan.FromMinutes 1.0)|> ignore
+        )
 

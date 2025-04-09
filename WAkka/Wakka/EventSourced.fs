@@ -179,6 +179,12 @@ module Internal =
         do updateMsgHandler msgHandler
         
         let mutable rejectionHandler = fun (_result:obj, _reasons: exn, _sequenceNr: int64)  -> ()
+        let simpleActionCtx = {
+            new Simple.ISimpleActionsContext with
+                member _.Ctx = ctx
+                member _.ActionCtx = this :> IActionContext
+                member _.SetMsgHandler newHandler = updateMsgHandler (fun _ m -> newHandler.HandleMessage m)
+        }
         
         let rec handleActions recovering action =
             match action with
@@ -193,17 +199,15 @@ module Internal =
                     if recovering then
                         updateMsgHandler (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                     else
-                        let onDone (res: obj) =
+                        let onDone (_, res: obj) =
                             rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
                             this.Persist (res, fun evt -> handleActions false (next evt))
-                        let setMsgHandler (handler: Simple.IMessageHandler) =
-                            updateMsgHandler (fun _ m -> handler.HandleMessage m)
-                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction)
+                        Simple.handleSimpleActions(simpleActionCtx, onDone, subAction)
                 | RunSkippableAction subAction ->
                     if recovering then
                         updateMsgHandler (fun stillRecovering msg -> handleActions stillRecovering (next msg))
                     else
-                        let onDone (res: obj) =
+                        let onDone (_, res: obj) =
                             rejectionHandler <- (fun (result, reason, sn) -> handleActions false (next (Rejected (result, reason, sn) :> obj)))
                             match res with
                             | :? ISkippableEvent as p ->
@@ -215,13 +219,11 @@ module Internal =
                                     )
                             | _ -> 
                                 failwith "Result was not ISkippableEvent"
-                        let setMsgHandler (handler: Simple.IMessageHandler) =
-                            updateMsgHandler (fun _ m -> handler.HandleMessage m)
                         let subAction' = Simple.actor {
                             let! r = subAction
                             return r :> obj
                         }
-                        Simple.handleSimpleActions(ctx, this, setMsgHandler, onDone, subAction')
+                        Simple.handleSimpleActions(simpleActionCtx, onDone, subAction')
                 | GetRecovering ->
                     handleActions recovering (next recovering)
                 | Snapshot snapshot ->
