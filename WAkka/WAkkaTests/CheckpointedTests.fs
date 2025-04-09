@@ -30,6 +30,7 @@
 
 module WAkkaTests.CheckpointedTests
 
+open System
 open NUnit.Framework
 
 open Akkling
@@ -70,24 +71,19 @@ let ``state is recovered after a crash`` () =
             return! crashHandle []
         }
 
-        let rec handle () = actor {
-            let! _  = Receive.Any ()
-            return! handle ()
-        }
-
         let start () = actor {
             let! crasher =
                 createChild (fun f ->
                     Spawn.Checkpointed(f, Props.Named "crasher", crashStart)
                 )
             do! typed probe <! crasher
-            return! handle ()
+            return! Receive.Any() |> ignoreResult
         }
         let parentProps = {
             Props.Named "parent" with
                 supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
         }
-        let _parent = Spawn.Checkpointed(tk.Sys, parentProps, start)
+        let _parent = Spawn.NotPersisted(tk.Sys, parentProps, start)
 
         let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
         let msg1 = "1"
@@ -100,5 +96,73 @@ let ``state is recovered after a crash`` () =
         let _res = probe.ExpectMsg<CrashMsg>()
         let msg3 = "3"
         tell crasher msg3
-        probe.ExpectMsg $"{msg3},{msg2},{msg1}"|> ignore
+        probe.ExpectMsg ($"{msg3},{msg2},{msg1}")|> ignore
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg4 = "4"
+        tell crasher msg4
+        probe.ExpectMsg ($"{msg4},{msg3},{msg2},{msg1}")|> ignore
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg5 = "5"
+        tell crasher msg5
+        probe.ExpectMsg ($"{msg5},{msg4},{msg3},{msg2},{msg1}")|> ignore
+
+[<Test>]
+let ``state is recovered after a repeated crash`` () =
+    TestKit.testDefault <| fun tk ->
+        let probe = tk.CreateTestProbe "probe"
+
+        let rec crashHandle recved = actor {
+            match! Receive.Any () with
+            | :? string as msg ->
+                let newRecved = msg :: recved
+                do! typed probe <! String.concat "," newRecved
+                return! crashHandle newRecved
+            | :? CrashIt ->
+                failwith "crashing"
+            | _ ->
+                return! crashHandle recved
+        }
+        let crashStart () = actor {
+            let! _ = setRestartHandler (fun (_ctx, msg, err) ->
+                tell (typed probe) {msg = msg; err = err}
+            )
+            return! crashHandle []
+        }
+
+        let start () = actor {
+            let! crasher =
+                createChild (fun f ->
+                    Spawn.Checkpointed(f, Props.Named "crasher", crashStart)
+                )
+            do! typed probe <! crasher
+            return! Receive.Any() |> ignoreResult
+        }
+        let parentProps = {
+            Props.Named "parent" with
+                supervisionStrategy = Strategy.OneForOne (fun _err -> Akka.Actor.Directive.Restart) |> Some
+        }
+        let _parent = Spawn.NotPersisted(tk.Sys, parentProps, start)
+
+        let crasher : IActorRef<string> = retype (probe.ExpectMsg<IActorRef<obj>> ())
+        let msg1 = "1"
+        tell crasher msg1
+        probe.ExpectMsg msg1 |> ignore
+        let msg2 = "2"
+        tell crasher msg2
+        probe.ExpectMsg $"{msg2},{msg1}"|> ignore
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg3 = "3"
+        tell crasher msg3
+        probe.ExpectMsg ($"{msg3},{msg2},{msg1}")|> ignore
+        // Check that repeated crashes with no other messages in between do not cause the state of the actor to reset
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        tell (retype crasher) CrashIt
+        let _res = probe.ExpectMsg<CrashMsg>()
+        let msg4 = "4"
+        tell crasher msg4
+        probe.ExpectMsg ($"{msg4},{msg3},{msg2},{msg1}")|> ignore
 

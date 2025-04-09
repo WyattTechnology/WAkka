@@ -48,7 +48,6 @@ type SimpleExtra =
 and SimpleAction<'Result> = ActionBase<'Result, SimpleExtra>
 and private IMessageHandlerFactory =
     abstract member CreateObj : (obj -> SimpleAction<obj>) * (SimpleAction<obj> -> unit) -> IMessageHandler
-    abstract member CreateUnit : (obj -> SimpleAction<unit>) * (SimpleAction<unit> -> unit) -> IMessageHandler
 and internal IMessageHandler =
     abstract member HandleMessage : obj -> unit    
 
@@ -98,18 +97,13 @@ type ActorBuilder () =
 /// Builds a SimpleAction.
 let actor = ActorBuilder ()
 
-module private SimpleActorPrivate =
-
-    type Start = {
-        checkpoint: Option<IMessageHandler>
-        restartHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>
-        stopHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext>
-    }
+type internal ISimpleActionsContext =
+    abstract member Ctx: Akka.Actor.IActorContext
+    abstract member ActionCtx: IActionContext
+    abstract member SetMsgHandler: IMessageHandler -> unit
 
 let internal handleSimpleActions (
-    ctx: Akka.Actor.IActorContext,
-    actionCtx: IActionContext,
-    setMsgHandler,
+    ctx: ISimpleActionsContext,
     onDone,
     startAction: SimpleAction<obj>) =
     
@@ -129,20 +123,20 @@ let internal handleSimpleActions (
             handler ()
         with
         | err ->
-            ctx.GetLogger().Error(err, "Got exception when running finally handler")
+            ctx.Ctx.GetLogger().Error(err, "Got exception when running finally handler")
 
     let rec handleActions (action: SimpleAction<obj>) =
         match action with
         | Done res ->
-            onDone res
+            onDone(ctx, res)
         | Stop _ ->
-            ctx.Stop ctx.Self
+            ctx.Ctx.Stop ctx.Ctx.Self
         | Simple next ->
-            handleActions (next actionCtx)
+            handleActions (next ctx.ActionCtx)
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
-                setMsgHandler (factory.CreateObj(next, handleActions))
+                ctx.SetMsgHandler (factory.CreateObj(next, handleActions))
             | TryWith(body, handler) ->
                 let cont res =
                     match res with
@@ -185,9 +179,9 @@ let internal handleSimpleActions (
         | Done result ->
             cont (Ok result)
         | Stop _ ->
-            ctx.Stop ctx.Self
+            ctx.Ctx.Stop ctx.Ctx.Self
         | Simple next ->
-            match convertExnToResult (fun () -> next actionCtx) with
+            match convertExnToResult (fun () -> next ctx.ActionCtx) with
             | Ok action -> handleTryWith cont handler action
             | Error err ->
                 match convertExnToResult (fun () -> handler err) with
@@ -196,7 +190,7 @@ let internal handleSimpleActions (
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
-                setMsgHandler (factory.CreateObj(next, handleTryWith cont handler))
+                ctx.SetMsgHandler (factory.CreateObj(next, handleTryWith cont handler))
             | TryWith(body, newHandler) ->
                 let cont' = makeNewCont next
                 let handleErrorBeforeFirstAction err =
@@ -231,11 +225,11 @@ let internal handleSimpleActions (
         | Done result ->
             cont (Ok result)
         | Stop _ ->
-            ctx.Stop ctx.Self
+            ctx.Ctx.Stop ctx.Ctx.Self
         | Simple next ->
             let nextRes =
                 try
-                    Ok (next actionCtx)
+                    Ok (next ctx.ActionCtx)
                 with
                 | err -> Result.Error err
             match nextRes with
@@ -244,7 +238,7 @@ let internal handleSimpleActions (
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
-                setMsgHandler (factory.CreateObj(next, handleException cont))
+                ctx.SetMsgHandler (factory.CreateObj(next, handleException cont))
             | TryWith(body, handler) ->
                 let cont' = makeNewCont next
                 let handleErrorBeforeFirstAction err =
@@ -284,9 +278,9 @@ let internal handleSimpleActions (
             runFinally handler
             cont (Ok result)
         | Stop _ ->
-            ctx.Stop ctx.Self
+            ctx.Ctx.Stop ctx.Ctx.Self
         | Simple next ->
-            match convertExnToResult (fun () -> next actionCtx) with
+            match convertExnToResult (fun () -> next ctx.ActionCtx) with
             | Ok action ->
                 handleTryFinally cont handler action
             | Error err ->
@@ -294,7 +288,7 @@ let internal handleSimpleActions (
         | Extra (extra, next) ->
             match extra with
             | WaitForMsg factory ->
-                setMsgHandler (factory.CreateObj(next, handleTryFinally cont handler))
+                ctx.SetMsgHandler (factory.CreateObj(next, handleTryFinally cont handler))
             | TryWith(body, newHandler) ->
                 let cont' = makeNewCont next
                 let handleErrorBeforeFirstAction err =
@@ -327,13 +321,6 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
     inherit Akka.Actor.UntypedActor ()
 
     let ctx = Akka.Actor.UntypedActor.Context :> Akka.Actor.IActorContext
-    do
-        let start : SimpleActorPrivate.Start = {
-            checkpoint = None
-            restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
-            stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
-        }
-        ctx.Self.Tell(start, ctx.Self)
         
     let mutable stash = Unchecked.defaultof<Akka.Actor.IStash>
 
@@ -347,22 +334,49 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
             member this.HandleMessage msg =
                 logger.Error("Received message before waitForStart installed: {0}", msg)
     }
+    let rec setMsgHandler handler =
+        msgHandler <- handler
+    let mutable simpleActionsCtx = SimpleActionsContextSimple(this)
+    
+    do
+        let start : Start = {
+            checkpoint = None
+            restartHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>()
+            stopHandlers = LifeCycleHandlers.LifeCycleHandlers<IActorContext>()
+        }
+        ctx.Self.Tell(start, ctx.Self)
 
     do
-        let onDone _ = ctx.Stop ctx.Self
-        msgHandler <- {
+        let onDone (ctx: ISimpleActionsContext, _res) = ctx.Ctx.Stop ctx.Ctx.Self
+        let drainStartMsg cont = {
+            // this gets rid of the Start message sent when the restarted actor constructor ran. We already got the
+            // Start message from the previous actor instance, if we don't get rid of the one from out constructor then
+            // repeated crashes with no other messages will cause the state to reset.
+            new IMessageHandler with 
+                member this.HandleMessage msg =
+                    match msg with 
+                    | :? Start ->
+                        setMsgHandler cont
+                        stash.UnstashAll ()
+                    | _ ->
+                        stash.Stash()
+                        
+        }
+        setMsgHandler {
             new IMessageHandler with
                 member _.HandleMessage (msg: obj) =
                     match msg with
-                    | :? SimpleActorPrivate.Start as start ->
+                    | :? Start as start ->
                         restartHandlers <- start.restartHandlers
                         stopHandlers <- start.stopHandlers
                         match start.checkpoint with
                         | None ->
-                            handleSimpleActions(ctx, this, (fun h -> msgHandler <- h), onDone, (startAction () |> mapResult (fun a -> a :> obj)))
-                        | Some cont ->
-                            msgHandler <- cont
-                        stash.UnstashAll ()
+                            handleSimpleActions(simpleActionsCtx, onDone, (startAction () |> mapResult (fun a -> a :> obj)))
+                            stash.UnstashAll ()
+                        | Some (cont, ctx) ->
+                            simpleActionsCtx <- ctx
+                            simpleActionsCtx.SetActor this
+                            setMsgHandler (drainStartMsg cont)
                     | _ ->
                         stash.Stash ()
         }
@@ -373,10 +387,10 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
         let logger = Logging.GetLogger (ctx.System, ctx.Self.Path.ToStringWithAddress())
         logger.Error $"Actor restarting after message {msg}: {err}"
         restartHandlers.ExecuteHandlers (this :> IActorContext, msg, err)
-        let startMsg : SimpleActorPrivate.Start = 
+        let startMsg : Start = 
             if persist then
                 {
-                    checkpoint = Some msgHandler
+                    checkpoint = Some (msgHandler, simpleActionsCtx)
                     restartHandlers = restartHandlers
                     stopHandlers = stopHandlers
                 }
@@ -392,6 +406,9 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
     override _.PostStop () =
         stopHandlers.ExecuteHandlers (this :> IActorContext)
         base.PostStop()
+        
+    member internal _.Ctx = ctx
+    member internal _.SetMsgHandler (handler: IMessageHandler) = setMsgHandler handler
         
     interface IActionContext with
         member _.Context = ctx
@@ -414,6 +431,21 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
         member _.Stash
             with get () = stash
             and set newStash = stash <- newStash
+            
+and private SimpleActionsContextSimple(act: SimpleActor) =
+    let mutable act = act
+    member _.SetActor newAct = act <- newAct
+    interface ISimpleActionsContext with
+        member _.Ctx = act.Ctx
+        member _.ActionCtx = act :> IActionContext
+        member _.SetMsgHandler newHandler = act.SetMsgHandler newHandler        
+
+and private Start = {
+    checkpoint: Option<IMessageHandler * SimpleActionsContextSimple>
+    restartHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext * obj * exn>
+    stopHandlers: LifeCycleHandlers.LifeCycleHandlers<IActorContext>
+}
+
 
 /// <summary>
 /// Class that can be used to spawn notPersisted actors. Usually, Spawn.spawn should be used to spawn actors, but if
@@ -655,8 +687,6 @@ module Actions =
         interface IMessageHandlerFactory with
             member _.CreateObj(cont: obj -> SimpleAction<obj>, actionHandler: SimpleAction<obj> -> unit) =                
                 MessageHandler<'Msg, 'Result, obj>(handler, cont, actionHandler)
-            member _.CreateUnit(cont:obj -> SimpleAction<unit>, actionHandler: SimpleAction<unit> -> unit) = 
-                MessageHandler<'Msg, 'Result, unit>(handler, cont, actionHandler)
             
     type Receive () =
         static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
