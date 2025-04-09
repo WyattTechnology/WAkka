@@ -348,6 +348,20 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
 
     do
         let onDone (ctx: ISimpleActionsContext, _res) = ctx.Ctx.Stop ctx.Ctx.Self
+        let drainStartMsg cont = {
+            // this gets rid of the Start message sent when the restarted actor constructor ran. We already got the
+            // Start message from the previous actor instance, if we don't get rid of the one from out constructor then
+            // repeated crashes with no other messages will cause the state to reset.
+            new IMessageHandler with 
+                member this.HandleMessage msg =
+                    match msg with 
+                    | :? Start ->
+                        setMsgHandler cont
+                        stash.UnstashAll ()
+                    | _ ->
+                        stash.Stash()
+                        
+        }
         setMsgHandler {
             new IMessageHandler with
                 member _.HandleMessage (msg: obj) =
@@ -358,12 +372,11 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
                         match start.checkpoint with
                         | None ->
                             handleSimpleActions(simpleActionsCtx, onDone, (startAction () |> mapResult (fun a -> a :> obj)))
+                            stash.UnstashAll ()
                         | Some (cont, ctx) ->
-                            //TODO: drain the extra start message
                             simpleActionsCtx <- ctx
                             simpleActionsCtx.SetActor this
-                            setMsgHandler cont
-                        stash.UnstashAll ()
+                            setMsgHandler (drainStartMsg cont)
                     | _ ->
                         stash.Stash ()
         }
