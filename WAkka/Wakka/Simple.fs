@@ -48,7 +48,6 @@ type SimpleExtra =
 and SimpleAction<'Result> = ActionBase<'Result, SimpleExtra>
 and private IMessageHandlerFactory =
     abstract member CreateObj : (obj -> SimpleAction<obj>) * (SimpleAction<obj> -> unit) -> IMessageHandler
-    abstract member CreateUnit : (obj -> SimpleAction<unit>) * (SimpleAction<unit> -> unit) -> IMessageHandler
 and internal IMessageHandler =
     abstract member HandleMessage : obj -> unit    
 
@@ -655,8 +654,6 @@ module Actions =
         interface IMessageHandlerFactory with
             member _.CreateObj(cont: obj -> SimpleAction<obj>, actionHandler: SimpleAction<obj> -> unit) =                
                 MessageHandler<'Msg, 'Result, obj>(handler, cont, actionHandler)
-            member _.CreateUnit(cont:obj -> SimpleAction<unit>, actionHandler: SimpleAction<unit> -> unit) = 
-                MessageHandler<'Msg, 'Result, unit>(handler, cont, actionHandler)
             
     type Receive () =
         static let handle (handler: 'Msg -> HandleMessagesResult<'Msg, 'Result>) =
