@@ -350,7 +350,7 @@ type SimpleActor (persist: bool, startAction: unit -> SimpleAction<unit>) as thi
         let onDone (ctx: ISimpleActionsContext, _res) = ctx.Ctx.Stop ctx.Ctx.Self
         let drainStartMsg cont = {
             // this gets rid of the Start message sent when the restarted actor constructor ran. We already got the
-            // Start message from the previous actor instance, if we don't get rid of the one from out constructor then
+            // Start message from the previous actor instance, if we don't get rid of the one from our constructor, then
             // repeated crashes with no other messages will cause the state to reset.
             new IMessageHandler with 
                 member this.HandleMessage msg =
@@ -449,7 +449,7 @@ and private Start = {
 
 /// <summary>
 /// Class that can be used to spawn notPersisted actors. Usually, Spawn.spawn should be used to spawn actors, but if
-/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment), then a new class
 /// can be derived from this class instead.  
 /// </summary>
 /// <param name="action">The action for the actor to run.</param>
@@ -461,7 +461,7 @@ type NotPersistedActor(action: unit -> SimpleAction<unit>) =
     
 /// <summary>
 /// Class that can be used to spawn checkpointed actors. Usually, Spawn.spawn should be used to spawn actors, but if
-/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment) then a new class
+/// you need a class type to use with Akka.Actor.Props.Create for special cases (like remote deployment), then a new class
 /// can be derived from this class instead.
 /// </summary>
 /// <param name="action">The action for the actor to run.</param>
@@ -522,7 +522,7 @@ type Spawn () =
 let spawnNotPersisted parent props action = spawn parent props false (fun () -> action)
 
 /// <summary>
-/// Creates and actor that runs the given action. If the actor crashes then it restarts from the last point where it
+/// Creates an actor that runs the given action. If the actor crashes, then it restarts from the last point where it
 /// was waiting for a message. NOTE: This function is deprecated, use Simple.Spawn.Checkpointed instead.
 /// </summary>
 /// <param name="parent">The parent for the actor.</param>
@@ -650,7 +650,7 @@ module Actions =
     
      /// The result of handling a message via Receive.HandleMessages.
     type HandleMessagesResult<'Msg, 'Result> =
-        /// We are done handling messages with the given result. If HandleMessages was the only action in the actor then
+        /// We are done handling messages with the given result. If HandleMessages was the only action in the actor, then
         /// the actor will stop, else the result given here will be the result of the HandleMessages action. 
         | IsDone of 'Result
         /// Continue processing messages using the current message handling function.
@@ -725,7 +725,7 @@ module Actions =
             handle recv
             
         /// Wait for a message for which the given function returns `Some`. If the timeout is reached before an appropriate
-        /// message is received then None is returned. What to do with other messages received while filtering is given
+        /// message is received, then None is returned. What to do with other messages received while filtering is given
         /// by the otherMsg argument, it defaults to ignoreOthers.
         static member Filter (choose: obj -> Option<'Msg>, timeout: TimeSpan, ?otherMsg) =
             let otherMsg = defaultArg otherMsg ignoreOthers
@@ -776,7 +776,7 @@ module Actions =
                     None
             Receive.Filter (filter, ?otherMsg = otherMsg)
         /// Waits for a message of the given type to be received. If the timeout is reached before an appropriate
-        /// message is received then None is returned. What to do with other messages received while filtering is
+        /// message is received, then None is returned. What to do with other messages received while filtering is
         /// given by the otherMsg argument, it defaults to ignoreOthers.
         static member Only<'Msg> (timeout: TimeSpan, ?otherMsg) : SimpleAction<Option<'Msg>> =
             let filter (msg: obj) =
@@ -794,7 +794,7 @@ module Actions =
                 | _ -> None
             Receive.Filter (filterType, ?otherMsg = otherMsg)
         /// Waits for a message of the given type that passes the given filter to be received. If the timeout is reached
-        /// before an appropriate message is received then None is returned. What to do with other messages received
+        /// before an appropriate message is received, then None is returned. What to do with other messages received
         /// while filtering is given by the otherMsg argument, it defaults to ignoreOthers.
         static member FilterOnly<'Msg> (timeout: TimeSpan, filter: 'Msg -> bool, ?otherMsg) : SimpleAction<Option<'Msg>> =
             let filterType (msg: obj) =
@@ -899,7 +899,7 @@ let foldValues (func: 'a -> 'res -> SimpleAction<'res>) (init: 'res) (values: se
     }
     loop values init
 
-/// Executes body as long as condition evaluates to true
+/// Executes body as long as the condition evaluates to true
 let executeWhile (condition: SimpleAction<Option<'condRes>>) (body: 'condRes -> SimpleAction<unit>) : SimpleAction<unit> =
     let rec loop () = actor {
         match! condition with

@@ -40,11 +40,11 @@ type ActorType =
 /// Creates an actor that goes back to the given action if it restarts. NOTE: This function is deprecated,
 /// use Simple.Spawn.NotPersisted instead.
 let notPersisted action = NotPersisted action
-/// Creates and actor that runs the given action. If the actor crashes then it restarts from the last point where it
+/// Creates an actor that runs the given action. If the actor crashes, then it restarts from the last point where it
 /// was waiting for a message. NOTE: This function is deprecated, use Simple.Spawn.Checkpointed instead.
 let checkpointed action = Checkpointed action
 /// Creates an actor that uses the Akka.NET persistence event sourcing mechanism. In the event of a restart, the actor
-/// will replay events that were stored using the EventSourced.Actions.persist action. NOTE: This function is deprecated,
+/// will replay events stored using the EventSourced.Actions.persist action. NOTE: This function is deprecated,
 /// use EventSourced.Spawn.NoSnapshots or EventSourced.Spawn.Snapshots instead.
 let eventSourced action = EventSourced action
 

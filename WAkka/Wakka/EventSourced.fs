@@ -74,7 +74,7 @@ type EventSourcedExtra<'Snapshot> =
     | AddSnapshotResultHandler of handler:(ISnapshotControl * SnapshotResult -> bool)
     | RemoveSnapshotResultHandler of index:int
     
-/// An action that can only be used directly in an event sourced actor (e.g. started using eventSourced).
+/// An action that can only be used directly in an event-sourced actor (e.g., started using eventSourced).
 type EventSourcedActionBase<'Result, 'Snapshot> = ActionBase<'Result, EventSourcedExtra<'Snapshot>>
 type NoSnapshotsAction<'Result> = EventSourcedActionBase<'Result, NoSnapshotExtra>
 type SnapshotAction<'Result, 'Snapshot> = EventSourcedActionBase<'Result, SnapshotExtra<'Snapshot>>
@@ -319,7 +319,7 @@ type private NoSnapshotHandler (startAction) =
 /// <summary>
 /// Class that can be used to spawn eventSourced actors that do not support snapshots. Usually, Spawn.NoSnapshots should
 /// be used to spawn this type of actor, but if you need a class type to use with Akka.Actor.Props.Create for special 
-/// cases (like remote deployment) then a new class can be derived from this class instead.  
+/// cases (like remote deployment), then a new class can be derived from this class instead.  
 /// </summary>
 /// <param name="startAction">The action for the actor to run.</param>
 /// <param name="persistenceId">The persistence id to use. If not given, the actor path will be used.</param>
@@ -352,7 +352,7 @@ type private SnapshotHandler<'Snapshot> (snapshotHandler) =
 /// <summary>
 /// Class that can be used to spawn event sourced actors. Usually, Spawn.WithSnapshots should be used to spawn this type
 /// of actor, but if you need a class type to use with Akka.Actor.Props.Create for special cases (like remote
-/// deployment) then a new class can be derived from this class instead.  
+/// deployment), then a new class can be derived from this class instead.  
 /// </summary>
 /// <param name="action">
 /// Function that generates the initial action for the actor. The function will be passed a persistence snapshot if
@@ -383,10 +383,10 @@ type EventSourcedSnapshotActor<'Snapshot>(
         EventSourcedSnapshotActor(handler, ?persistenceId = persistenceId)
     
 /// <summary>
-/// The properties for an event sourced actor.
+/// The properties for an event-sourced actor.
 /// </summary>
 type EventSourcedProps = {
-    /// The persistence id for the actor. If None then the actor's path will be used.
+    /// The persistence id for the actor. If None, then the actor's path will be used.
     persistenceId: Option<string>
     /// The common properties for the actor.
     common: Props
@@ -425,7 +425,7 @@ with
 type Spawn =
     
     /// <summary>
-    /// Spawns an event sourced actor. This variant does not support snapshots.
+    /// Spawns an event-sourced actor. This variant does not support snapshots.
     /// </summary>
     /// <param name="parent">The actor's parent.</param>
     /// <param name="props">The actor's properties.</param>
@@ -446,7 +446,7 @@ type Spawn =
         Akkling.ActorRefs.typed act
         
     /// <summary>
-    /// Spawns an event sourced actor. This variant supports snapshots.
+    /// Spawns an event-sourced actor. This variant supports snapshots.
     /// </summary>
     /// <param name="parent">The actor's parent.</param>
     /// <param name="props">The actor's properties.</param>
@@ -477,7 +477,7 @@ type Spawn =
         Akkling.ActorRefs.typed act
 
 /// <summary>
-/// Spawns an event sourced actor. This variant does not support snapshots. This exists for backwards compatibility, use
+/// Spawns an event-sourced actor. This variant does not support snapshots. This exists for backwards compatibility, use
 /// Spawn.NoSnapshots instead.
 /// </summary>
 /// <param name="parent">The parent for the new actor.</param>
@@ -487,7 +487,7 @@ let spawnNoSnapshots (parent: Akka.Actor.IActorRefFactory) (props: EventSourcedP
     Spawn.NoSnapshots (parent, props, (fun () -> action))
 
 /// <summary>
-/// Spawns an event sourced actor. This variant supports snapshots. This exists for backwards compatibility, use
+/// Spawns an event-sourced actor. This variant supports snapshots. This exists for backwards compatibility, use
 /// Spawn.WithSnapshots instead.
 /// </summary>
 /// <param name="parent">The parent for the new actor.</param>
@@ -521,7 +521,7 @@ module Actions =
         | ActionResult of 'Result
         /// The action was executed, but the result was rejected for the given reason by the persistence system.
         | ActionResultRejected of result:'Result * reason:exn * sequenceNr:int64
-        /// Recovery was running, but has now finished. The action was not executed and should be repeated if its
+        /// Recovery was running but has now finished. The action was not executed and should be repeated if its
         /// result is needed.  
         | RecoveryDone
     
@@ -532,10 +532,10 @@ module Actions =
     /// </para>
     /// <para>
     /// This version of persist will return persistence lifecycle events
-    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned then
+    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned, then
     /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
     /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
-    /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
+    /// RecoveryDone value (the action will not have been executed, if its result is needed, then call persist again
     /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned.
     /// If persisting an event fails, then the failure will be logged and the actor will stop.  
     /// </para>
@@ -571,10 +571,10 @@ module Actions =
     /// </para>
     /// <para>
     /// This version of persist will return persistence lifecycle events
-    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned then
+    /// in addition to the results of the action passed to persist. If something other than ActionResult is returned, then
     /// the action was not executed. The action will also not be executed if the actor is recovering, instead the
     /// ActionExecuted values will be read from the event log until it runs out, at which point persist will return a
-    /// RecoveryDone value (the action will not have been executed, if it's result is needed then call persist again
+    /// RecoveryDone value (the action will not have been executed, if its result is needed, then call persist again
     /// to execute the action). If the persistence system rejects a result, then ActionResultRejected will be returned.
     /// If persisting an event fails, then the failure will be logged and the actor will stop.  
     /// </para>
@@ -606,8 +606,8 @@ module Actions =
     /// </para>
     /// <para>
     /// This version of persist will not return persistence lifecycle
-    /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
-    /// If a result is produced then it was either read from the event log if recovering or the product of executing the
+    /// events, and if recovery fails or a result is rejected by the persistence system, then it will stop the actor.
+    /// If a result is produced, then it was either read from the event log if recovering or the product of executing the
     /// action if not recovering. Unlike persist, persistSimple will always execute its action.
     /// </para>
     /// </summary>
@@ -643,8 +643,8 @@ module Actions =
     /// </para>
     /// <para>
     /// This version of persist will not return persistence lifecycle
-    /// events and if recovery fails or a result is rejected by the persistence system , then it will stop the actor.
-    /// If a result is produced then it was either read from the event log if recovering or the product of executing the
+    /// events, and if recovery fails or a result is rejected by the persistence system, then it will stop the actor.
+    /// If a result is produced, then it was either read from the event log if recovering or the product of executing the
     /// action if not recovering. Unlike persist, persistSimple will always execute its action.
     /// </para>
     /// </summary>
@@ -681,7 +681,7 @@ module Actions =
         return (res :?> int64)
     }
     
-    /// Saves a snapshot of the actor's state. If you are interested in success/failure then watch for
+    /// Saves a snapshot of the actor's state. If you are interested in success or failure, then watch for
     /// Akka.Persistence.SaveSnapshotSuccess and/or Akka.Persistence.SaveSnapshotFailure messages or provide
     /// a snapshot result handler when starting the actor.  
     let saveSnapshot (snapshot: 'SnapShot) : SnapshotAction<unit, 'SnapShot> = actor {
@@ -689,21 +689,21 @@ module Actions =
         return ()
     }
 
-    /// Deletes events up to the given sequence number. If you are interested in success/failure then watch for
+    /// Deletes events up to the given sequence number. If you are interested in success or failure, then watch for
     /// Akka.Persistence.DeleteMessagesSuccess and/or Akka.Persistence.DeleteMessagesFailure messages.
     let deleteEvents (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteEvents sequenceNr), Done)
         return ()
     }
 
-    /// Deletes snapshots up to the given sequence number. If you are interested in success/failure then watch for
+    /// Deletes snapshots up to the given sequence number. If you are interested in success or failure, then watch for
     /// Akka.Persistence.DeleteSnapshotSuccess and/or Akka.Persistence.DeleteSnapshotFailure messages.
     let deleteSnapshot (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshot sequenceNr), Done)
         return ()
     }
     
-    /// Deletes snapshots that satisfy the given criteria. If you are interested in success/failure then watch for
+    /// Deletes snapshots that satisfy the given criteria. If you are interested in success or failure, then watch for
     /// Akka.Persistence.DeleteSnapshotsSuccess and/or Akka.Persistence.DeleteSnapshotsFailure messages.
     let deleteSnapshots (criteria: Akka.Persistence.SnapshotSelectionCriteria) : SnapshotAction<unit, 'SnapShot> = actor {
         let! _ = Extra(Snapshot (DeleteSnapshots criteria), Done)
@@ -729,7 +729,7 @@ module Actions =
     /// If true, then on snapshot success, all snapshots prior to the most recent are deleted.
     /// </param>
     /// <param name="errorHandler">
-    /// If given, it will be called if there is a snapshot save error. If it returns false then the actor will be
+    /// If given, it will be called if there is a snapshot save error. If it returns false, then the actor will be
     /// stopped. If not given, snapshot save errors will be logged only.
     /// </param>
     type SnapshotResultHandler(deletePriorMessages, deletePriorSnapshots, ?errorHandler) =
@@ -754,7 +754,7 @@ module Actions =
                     )
                     true
 
-    /// Removes a snapshot result handler that was registered using addSnapshotResultHandler. 
+    /// Removes a snapshot result handler registered using addSnapshotResultHandler. 
     let removeSnapshotResultHandler index : SnapshotAction<unit, 'Snapshot> = actor {
         let! _ = Extra(RemoveSnapshotResultHandler index, Done)
         return ()
