@@ -171,8 +171,8 @@ module ActorResultCE =
                              binder: 'okInput -> ActorResult<'okOutput, 'error>
                              ) : SimpleAction<Result<'okOutput, 'error>> =
             ActorResult.bind binder result
-        member inline _.Delay (generator: unit -> SimpleAction<Result<'ok, 'error>>) : Delayed<Result<'ok, 'error>> =
-            actor.Delay generator
+        member inline _.Delay (generator: unit -> SimpleAction<Result<'ok, 'error>>) : SimpleAction<Result<'ok, 'error>> =
+            generator ()
         member inline this.Combine
             (
                 computation1: SimpleAction<Result<unit, 'error>>,
@@ -186,9 +186,12 @@ module ActorResultCE =
     /// Result that the action evaluated to. If the result is "Ok okValue" then "okValue" is bound to "value". If the
     /// result is "Error err" then the "actorResult" CE terminates with a value of "Error err". Note that the right
     /// side of a "let! ... = ..." must evaluate to "SimpleAction<Result<'res, 'err>>". There are numerous functions in
-    /// the ActorResult module that can help convert other types (booleans, options, etc.) into the proper type. The
-    /// "actorResult" CE produces a "Delayed<Result<'res, 'err>>" and must be passed to runActorResult for evaluation.
+    /// the ActorResult module that can help convert other types (booleans, options, etc.) into the proper type.
+    /// "actorResult" computations can be directly run in actor expressions (e.g.,
+    /// "actor {let! res = actorResult { ... }; ...}").
     let actorResult = ActorResultBuilder()
-    /// Evaluates an actorResult computation expression.
-    let runActorResult (res: Delayed<Result<'res, 'err>>) = res ()
+    
+    /// Evaluates an actorResult computation expression. This is only here for backwards compatibility, actorResult
+    /// computations can now be directly run in actor expressions (e.g., "actor {let! res = actorResult { ... }; ...}").
+    let runActorResult (res: SimpleAction<Result<'res, 'err>>) = res
 

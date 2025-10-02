@@ -55,22 +55,21 @@ let ``actor result: computation expression`` ([<ValueSource("actorFunctions")>] 
                 (fun () ->
                     let rec loop () =
                         actor {
-                            let! res =
-                                runActorResult (
-                                    actorResult {
-                                        let! msg1 = Receive.Only<Result<int, string>> ()
-                                        do! ActorResult.ofActor ((typed probe) <! "intermediate message")
-                                        let! msg2 = Receive.Only<Result<int, string>> ()
-                                        return msg1 + msg2
-                                    }
-                                )
+                            let! res = actorResult {
+                                let! msg1 = Receive.Only<Result<int, string>> ()
+                                do! ActorResult.ofActor ((typed probe) <! "intermediate message")
+                                let! msg2 = actorResult {
+                                    // this tests that actorResult expressions can be nested (this wasn't possible at one point)
+                                    return! Receive.Only<Result<int, string>> ()
+                                }
+                                return msg1 + msg2
+                            }
                             do! typed probe <! res
                             return! loop ()
                         }
                     loop ()
                 )
             )
-
         tellNow (retype act) (Result<int, string>.Ok 1)
         probe.ExpectMsg "intermediate message" |> ignore
         tellNow (retype act) (Result<int, string>.Ok 2)
