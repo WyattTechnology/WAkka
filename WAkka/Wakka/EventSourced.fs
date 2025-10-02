@@ -37,8 +37,6 @@ open WAkka.LifeCycleHandlers
 type NoSnapshotExtra = NoSnapshotExtra
 
 type SnapshotExtra<'Snapshot> =
-    | GetLastSequenceNumber
-    | DeleteEvents of sequenceNr:int64
     | SaveSnapshot of snapshot:'Snapshot
     | DeleteSnapshot of sequenceNr:int64
     | DeleteSnapshots of criteria:Akka.Persistence.SnapshotSelectionCriteria
@@ -70,6 +68,8 @@ type EventSourcedExtra<'Snapshot> =
     | RunAction of action:Simple.SimpleAction<obj>
     | RunSkippableAction of action:Simple.SimpleAction<ISkippableEvent>
     | GetRecovering
+    | GetLastSequenceNumber
+    | DeleteEvents of sequenceNr:int64    
     | Snapshot of snapshot:'Snapshot
     | AddSnapshotResultHandler of handler:(ISnapshotControl * SnapshotResult -> bool)
     | RemoveSnapshotResultHandler of index:int
@@ -226,6 +226,11 @@ module Internal =
                         Simple.handleSimpleActions(simpleActionCtx, onDone, subAction')
                 | GetRecovering ->
                     handleActions recovering (next recovering)
+                | GetLastSequenceNumber ->
+                    handleActions recovering (next this.LastSequenceNr)
+                | DeleteEvents sequenceNr ->
+                    this.DeleteMessages sequenceNr
+                    handleActions recovering (next ())
                 | Snapshot snapshot ->
                     handleActions recovering (handler.HandleSnapshotExtra snapshot this next)
                 | AddSnapshotResultHandler handler ->
@@ -334,11 +339,6 @@ type private SnapshotHandler<'Snapshot> (snapshotHandler) =
         member _.SnapshotHandler snapshot = snapshotHandler (snapshot |> Option.map(fun s -> s :?> 'Snapshot))
         member _.HandleSnapshotExtra extra act next =
             match extra with
-            | GetLastSequenceNumber ->
-                next act.LastSequenceNr
-            | DeleteEvents sequenceNr ->
-                act.DeleteMessages sequenceNr
-                next ()
             | SaveSnapshot snapshot ->
                 act.SaveSnapshot snapshot
                 next ()
@@ -676,8 +676,8 @@ module Actions =
     }
     
     /// Gets the sequence number of the last persistence operation.
-    let getLastSequenceNumber () : SnapshotAction<int64, 'SnapShot> = actor {
-        let! res = Extra(Snapshot GetLastSequenceNumber, Done)
+    let getLastSequenceNumber () : EventSourcedActionBase<int64, 'Extra> = actor {
+        let! res = Extra(GetLastSequenceNumber, Done)
         return (res :?> int64)
     }
     
@@ -691,8 +691,8 @@ module Actions =
 
     /// Deletes events up to the given sequence number. If you are interested in success or failure, then watch for
     /// Akka.Persistence.DeleteMessagesSuccess and/or Akka.Persistence.DeleteMessagesFailure messages.
-    let deleteEvents (sequenceNr: int64) : SnapshotAction<unit, 'SnapShot> = actor {
-        let! _ = Extra(Snapshot (DeleteEvents sequenceNr), Done)
+    let deleteEvents (sequenceNr: int64) : EventSourcedActionBase<unit, 'Extra> = actor {
+        let! _ = Extra(DeleteEvents sequenceNr, Done)
         return ()
     }
 

@@ -950,5 +950,54 @@ let ``filter only inside of persist works`` () =
         tell (retype act) m1
         probe.ExpectMsg(Some m1) |> ignore        
 
+[<Test>]
+let ``message are deleted by delete messages`` () =
+    TestKit.testDefault <| fun tk ->
+        let cur = Environment.CurrentDirectory
+        IO.Directory.Delete (IO.Path.Combine(cur, "snapshots"), true)
+        let action initState = actor {
+            let rec inner state = Simple.actor {
+                match! Receive.Only<string>() with
+                | "get" ->
+                    let! sender = getSender()
+                    do! sender <! state
+                    return! inner state
+                | add ->
+                    return add
+            }
+            let rec outer state = actor {
+                let! add = persistSimple (inner state)
+                let newState = state + add
+                let! seqNum = getLastSequenceNumber()
+                do! deleteEvents seqNum
+                return! outer newState
+            }
+            return! outer initState
+        }
+        
+        let probe = tk.CreateTestProbe "probe"
+        let handleSnapshot state =
+            match state with
+            | Some s -> 
+                tellNow (typed probe) s
+                action s
+            | None ->
+                action ""
+        let act1 = Spawn.NoSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-events-id", actorName = "act1"), fun () -> action "")
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        tellNow act1 "1"
+        tellNow act1 "2"
+        tellNow act1 "3"
+        let res1 = (retype act1).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res1 |> shouldEqual "123"
+        tk.Watch (untyped act1) |> ignore
+        tellNow (retype act1) Akka.Actor.PoisonPill.Instance
+        tk.ExpectTerminated (untyped act1) |> ignore //make sure actor stops before starting new one
+        
+        let act2 = Spawn.WithSnapshots(tk.Sys, EventSourcedProps.PersistenceId("delete-events-id", actorName = "act2"), handleSnapshot)
+        probe.ExpectNoMsg(TimeSpan.FromMilliseconds 200.0)
+        let res2 = (retype act2).Ask<string>("get", Some (TimeSpan.FromMilliseconds 500.0)) |> Async.RunSynchronously
+        res2 |> shouldEqual ""
 
-//NOTE: If new tests are added for the event sourced actor, it should probably be added for snapshot actors as well
+
+//NOTE: If new tests are added for the event-sourced actor, it should probably be added for snapshot actors as well
