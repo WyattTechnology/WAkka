@@ -183,13 +183,13 @@ module CommonActions =
     
     /// Stops this actor.
     let stop () =
-        // This weird dance is here so that the result of stop can adapt to the context that it is called in, and
+        // This dance is here so that the result of stop can adapt to the context that it is called in, and
         // we don't have to do "do! stop (); return! something" and instead just do "return! stop ()" when an
         // Action<'Result, 'a> is expected and 'Result is not unit.
         bindBase (fun () -> Done Unchecked.defaultof<'Result>) (Stop Done)
 
     /// Creates a child of this actor. The given function will be passed an IActorRefFactory to use as the parent for
-    /// the child actor and the function's result will be the result of the action.
+    /// the child actor, and the function's result will be the result of the action.
     let createChild (make: Akka.Actor.IActorRefFactory -> 'Result) =
         Simple (fun ctx -> Done (make ctx.ActorFactory))
 

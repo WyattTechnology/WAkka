@@ -103,7 +103,7 @@ module ActorResult =
     ///     AsyncResult.ok "First" |> AsyncResult.orElseWith (fun _ -> AsyncResult.error "Second") // evaluates to Ok ("First")
     ///     AsyncResult.ok "First" |> AsyncResult.orElseWith (fun _ -> AsyncResult.ok "Second") // evaluates to Ok ("First")
     /// </code>
-    /// </example>
+    /// </example>1
     /// <returns>
     /// The result if the result is Ok, else the result of executing <paramref name="ifErrorFunc"/>.
     /// </returns>
