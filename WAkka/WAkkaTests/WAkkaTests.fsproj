@@ -29,6 +29,8 @@
     <ItemGroup>
       <Compile Include="SimpleTests.fs" />
       <Compile Include="ActorResultTests.fs" />
+      <Compile Include="ActorResultTests-EventSourced.fs" />
+      <Compile Include="ActorResultTests-WithSnapshotsEventSourced.fs" />
       <Compile Include="NotPersistedTests.fs" />
       <Compile Include="CheckpointedTests.fs" />
       <Compile Include="EventSourcedTests.fs" />
