@@ -28,7 +28,7 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-module WAkkaTests.ActorResultTests
+module WAkkaTests.ActorResultWithSnapshotsEventSourcedTests
 
 
 open NUnit.Framework
@@ -36,12 +36,17 @@ open NUnit.Framework
 open Akkling
 
 open WAkka.Common
-open WAkka.Simple
+open WAkka.EventSourced
 open WAkka.ActorResult
+module ws = WAkka.Simple
 
-type ActorFunction = Akka.Actor.IActorRefFactory * Props * (unit -> SimpleAction<unit>) -> IActorRef<obj>
-let actorFunctions : ActorFunction [] =
-    [|Spawn.NotPersisted; Spawn.Checkpointed|]
+// Couldn't figure out how to fit the EventSourced actor spawn functions into ActorResultTests.actorFunctions, so just
+// copying the tests here. Also, could not figure out how to fit NoSnapshots here either, so the tests are copied
+// again for those in ActorResultEventSourcedTests.fs
+type ActorFunction = Akka.Actor.IActorRefFactory * EventSourcedProps * (Option<unit> -> SnapshotAction<unit, unit>) -> IActorRef<obj>
+let actorFunctions : ActorFunction [] =[|Spawn.WithSnapshots|]
+
+let receiveMsg<'Msg> ()  = persistSimple (ws.Actions.Receive.Only<'Msg> ())
 
 [<Test>]
 let ``actor result: computation expression`` ([<ValueSource("actorFunctions")>] makeActor: ActorFunction) =
@@ -51,16 +56,16 @@ let ``actor result: computation expression`` ([<ValueSource("actorFunctions")>] 
         let act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () ->
+                EventSourcedProps.Named "ce-test",
+                (fun _ ->
                     let rec loop () =
                         actor {
                             let! res = actorResult {
-                                let! msg1 = Receive.Only<Result<int, string>> ()
+                                let! msg1 = receiveMsg<Result<int, string>>()
                                 do! ActorResult.ofActor ((typed probe) <! "intermediate message")
                                 let! msg2 = actorResult {
                                     // this tests that actorResult expressions can be nested (this wasn't possible at one point)
-                                    return! Receive.Only<Result<int, string>> ()
+                                    return! receiveMsg<Result<int, string>>()
                                 }
                                 return msg1 + msg2
                             }
@@ -91,13 +96,13 @@ let ``actor result: orElse`` ([<ValueSource("actorFunctions")>] makeActor:  Acto
         let act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () ->
+                EventSourcedProps.Named "ce-test",
+                (fun _ ->
                     let rec loop () =
                         actor {
                             let! res =
-                                Receive.Only<Result<int, string>> ()
-                                |> ActorResult.orElse (Receive.Only<Result<int, string>> ())
+                                receiveMsg<Result<int, string>>()
+                                |> ActorResult.orElse (receiveMsg<Result<int, string>>())
                             do! typed probe <! res
                             return! loop ()
                         }
@@ -124,14 +129,14 @@ let ``actor result: orElseWith`` ([<ValueSource("actorFunctions")>] makeActor:  
         let act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () -> 
+                EventSourcedProps.Named "ce-test",
+                (fun _ -> 
                      let rec loop () = actor {
                          let! res =
-                             Receive.Only<Result<int, string>> ()
+                             receiveMsg<Result<int, string>>()
                              |> ActorResult.orElseWith (fun err1 ->
                                  tellNow (typed probe) err1
-                                 Receive.Only<Result<int, string>> ()
+                                 receiveMsg<Result<int, string>>()
                              )
                          do! typed probe <! res
                          return! loop ()
@@ -161,10 +166,10 @@ let ``actor result: ignore`` ([<ValueSource("actorFunctions")>] makeActor:  Acto
         let act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () ->
+                EventSourcedProps.Named "ce-test",
+                (fun _ ->
                      let rec loop () = actor {
-                         let! msg = Receive.Only<Result<string, string>> () |> ActorResult.ignore
+                         let! msg = receiveMsg<Result<string, string>>() |> ActorResult.ignore
                          do! typed probe <! msg
 
                          return! loop ()
@@ -186,8 +191,8 @@ let testRequire makeActor require test =
         let act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () ->
+                EventSourcedProps.Named "ce-test",
+                (fun _ ->
                      let rec loop () = actor {
                          let! msg = require
                          do! typed probe <! msg
@@ -203,7 +208,7 @@ let testRequire makeActor require test =
 let ``actor result: requireTrue`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<bool> () |> ActorResult.requireTrue "failed to get true")
+        (receiveMsg () |> ActorResult.requireTrue "failed to get true")
         (fun act probe ->
             tellNow (retype act) true
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -215,7 +220,7 @@ let ``actor result: requireTrue`` ([<ValueSource("actorFunctions")>] makeActor: 
 let ``actor result: requireFalse`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<bool> () |> ActorResult.requireFalse "failed to get false")
+        (receiveMsg () |> ActorResult.requireFalse "failed to get false")
         (fun act probe ->
             tellNow (retype act) false
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -231,7 +236,7 @@ type WrapOption<'a> = {
 let ``actor result: requireSome`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<WrapOption<int>> () |> mapResult (fun w -> w.value) |> ActorResult.requireSome "failed to get some")
+        (receiveMsg<WrapOption<int>>() |> mapResult (fun w -> w.value) |> ActorResult.requireSome "failed to get some")
         (fun act probe ->
             tellNow (retype act) {value = Some 1}
             probe.ExpectMsg (Result<int, string>.Ok 1) |> ignore
@@ -243,7 +248,7 @@ let ``actor result: requireSome`` ([<ValueSource("actorFunctions")>] makeActor: 
 let ``actor result: requireNone`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<WrapOption<int>> () |> mapResult (fun w -> w.value) |> ActorResult.requireNone "failed to get none")
+        (receiveMsg<WrapOption<int>>() |> mapResult (fun w -> w.value) |> ActorResult.requireNone "failed to get none")
         (fun act probe ->
             tellNow (retype act) {value = Option<int>.None}
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -255,7 +260,7 @@ let ``actor result: requireNone`` ([<ValueSource("actorFunctions")>] makeActor: 
 let ``actor result: requireEqual`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (ActorResult.requireEqual 1 (Receive.Only<int> ()) "failed to get equal")
+        (ActorResult.requireEqual 1 (receiveMsg()) "failed to get equal")
         (fun act probe ->
             tellNow (retype act) 1
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -267,7 +272,7 @@ let ``actor result: requireEqual`` ([<ValueSource("actorFunctions")>] makeActor:
 let ``actor result: requireEqualTo`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (ActorResult.requireEqualTo 1 "failed to get equal" (Receive.Only<int> ()))
+        (ActorResult.requireEqualTo 1 "failed to get equal" (receiveMsg()))
         (fun act probe ->
             tellNow (retype act) 1
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -279,7 +284,7 @@ let ``actor result: requireEqualTo`` ([<ValueSource("actorFunctions")>] makeActo
 let ``actor result: requireEmpty`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<int []> () |> ActorResult.requireEmpty "failed to get empty")
+        (receiveMsg<int []>() |> ActorResult.requireEmpty "failed to get empty")
         (fun act probe ->
             tellNow (retype act) Array.empty<int>
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -291,7 +296,7 @@ let ``actor result: requireEmpty`` ([<ValueSource("actorFunctions")>] makeActor:
 let ``actor result: requireNotEmpty`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<int []> () |> ActorResult.requireNotEmpty "failed to get not empty")
+        (receiveMsg<int []>() |> ActorResult.requireNotEmpty "failed to get not empty")
         (fun act probe ->
             tellNow (retype act) [|1|]
             probe.ExpectMsg (Result<unit, string>.Ok ()) |> ignore
@@ -303,7 +308,7 @@ let ``actor result: requireNotEmpty`` ([<ValueSource("actorFunctions")>] makeAct
 let ``actor result: requireHead`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<int []> () |> ActorResult.requireHead "failed to get first")
+        (receiveMsg<int []>() |> ActorResult.requireHead "failed to get first")
         (fun act probe ->
             tellNow (retype act) [|1|]
             probe.ExpectMsg (Result<int, string>.Ok 1) |> ignore
@@ -315,7 +320,7 @@ let ``actor result: requireHead`` ([<ValueSource("actorFunctions")>] makeActor: 
 let ``actor result: ofActor`` ([<ValueSource("actorFunctions")>] makeActor:  ActorFunction) =
     testRequire
         makeActor
-        (Receive.Only<int> () |> ActorResult.ofActor)
+        (receiveMsg<int>() |> ActorResult.ofActor)
         (fun act probe ->
             tellNow (retype act) 1
             probe.ExpectMsg (Result<int, obj>.Ok 1) |> ignore
@@ -329,8 +334,8 @@ let ``actor result: ofResult`` ([<ValueSource("actorFunctions")>] makeActor:  Ac
         let _act =
             makeActor(
                 tk.Sys,
-                Props.Named "ce-test",
-                (fun () -> 
+                EventSourcedProps.Named "ce-test",
+                (fun _ -> 
                      actor {
                          let! msg = Ok 1 |> ActorResult.ofResult
                          do! typed probe <! msg
